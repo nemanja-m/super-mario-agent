@@ -26,7 +26,7 @@ class ResizeFrameEnvWrapper(gym.ObservationWrapper):
         self.height = height
         self.grayscale = grayscale
         channels = 1 if grayscale else 3
-        shape = (self.height, self.width, channels)
+        shape = (channels, self.height, self.width)  # pytorch uses channel first images
         self.observation_space = gym.spaces.Box(low=0, high=255, shape=shape,
                                                 dtype=env.observation_space.dtype)
 
@@ -41,7 +41,7 @@ class ResizeFrameEnvWrapper(gym.ObservationWrapper):
         if self.grayscale:
             frame = frame[:, :, None]
 
-        return frame
+        return frame.transpose(2, 0, 1)  # pytorch uses channel first images
 
 
 def _create_environment(env_name: str='SuperMarioBrosRandomStages-v0') -> gym.Env:
@@ -79,48 +79,47 @@ def _worker(remote: Connection,
 class MultiprocessEnvironment:
 
     def __init__(self, n_envs: int):
-        self.closed = False
+        self._closed = False
+        self._remotes, self._work_remotes = zip(*[mp.Pipe() for _ in range(n_envs)])
+        self._processes = []
 
-        self.remotes, self.work_remotes = zip(*[mp.Pipe() for _ in range(n_envs)])
-        self.processes = []
-
-        for work_remote, remote in zip(self.work_remotes, self.remotes):
+        for work_remote, remote in zip(self._work_remotes, self._remotes):
             env = _create_environment()
             args = (work_remote, remote, env)
             process = mp.Process(target=_worker, args=args, daemon=True)
             process.start()
-            self.processes.append(process)
+            self._processes.append(process)
             work_remote.close()
 
     def step(self, actions: Iterable[int]):
-        for remote, action in zip(self.remotes, actions):
+        for remote, action in zip(self._remotes, actions):
             remote.send(('step', action))
 
-        results = [remote.recv() for remote in self.remotes]
-        import ipdb; ipdb.set_trace()  # XXX BREAKPOINT
-        return list(zip(*results))
+        observations, rewards, dones, infos = zip(*[remote.recv()
+                                                    for remote in self._remotes])
+        return observations, rewards, dones, infos
 
     def reset(self):
-        for remote in self.remotes:
+        for remote in self._remotes:
             remote.send(('reset', None))
-        obs = [remote.recv() for remote in self.remotes]
+        obs = [remote.recv() for remote in self._remotes]
         return obs
 
     def render(self) -> None:
-        for remote in self.remotes:
+        for remote in self._remotes:
             remote.send(('render', None))
 
     def close(self) -> None:
-        if self.closed:
+        if self._closed:
             return
 
-        for remote in self.remotes:
+        for remote in self._remotes:
             remote.send(('close', None))
 
-        for process in self.processes:
+        for process in self._processes:
             process.join()
 
-        self.closed = True
+        self._closed = True
 
 
 if __name__ == '__main__':
