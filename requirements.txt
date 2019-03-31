@@ -1,0 +1,1 @@
+gym-super-mario-bros==7.1.6
