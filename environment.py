@@ -16,7 +16,10 @@ class ResizeFrameEnvWrapper(gym.ObservationWrapper):
                  width: int = 128,
                  height: int = 120,
                  grayscale: bool = False):
-        """Warp frames to width x height.
+        """Resize env frames to width x height.
+
+        State image dimensions are transposed to match pytorch image dimension
+        conventions.  Pytorch uses (channels, height, width) image shape.
 
         :param env: (Gym Environment) the environment
 
@@ -26,8 +29,9 @@ class ResizeFrameEnvWrapper(gym.ObservationWrapper):
         self.height = height
         self.grayscale = grayscale
         channels = 1 if grayscale else 3
-        shape = (channels, self.height, self.width)  # pytorch uses channel first images
-        self.observation_space = gym.spaces.Box(low=0, high=255, shape=shape,
+        shape = (channels, self.height, self.width)
+        self.observation_space = gym.spaces.Box(low=0, high=255,
+                                                shape=shape,
                                                 dtype=env.observation_space.dtype)
 
     def observation(self, frame: np.ndarray) -> np.ndarray:
@@ -41,12 +45,14 @@ class ResizeFrameEnvWrapper(gym.ObservationWrapper):
         if self.grayscale:
             frame = frame[:, :, None]
 
-        return frame.transpose(2, 0, 1)  # pytorch uses channel first images
+        # pytorch uses channel first images
+        return frame.transpose(2, 0, 1).astype(np.float32)
 
 
 def _create_environment(env_name: str='SuperMarioBrosRandomStages-v0') -> gym.Env:
     env = gym_super_mario_bros.make(env_name)
-    env = BinarySpaceToDiscreteSpaceEnv(env, actions.SIMPLE_MOVEMENT)
+    env = ResizeFrameEnvWrapper(env)
+    env = BinarySpaceToDiscreteSpaceEnv(env, actions.COMPLEX_MOVEMENT)
     return env
 
 
@@ -91,19 +97,25 @@ class MultiprocessEnvironment:
             self._processes.append(process)
             work_remote.close()
 
+        self.action_space_size = env.action_space.n
+        self.state_frame_channels = env.observation_space.shape[0]
+
     def step(self, actions: Iterable[int]):
         for remote, action in zip(self._remotes, actions):
             remote.send(('step', action))
 
         observations, rewards, dones, infos = zip(*[remote.recv()
                                                     for remote in self._remotes])
-        return observations, rewards, dones, infos
+        return (np.stack(observations),
+                np.stack(rewards),
+                np.stack(dones),
+                np.stack(infos))
 
     def reset(self):
         for remote in self._remotes:
             remote.send(('reset', None))
         obs = [remote.recv() for remote in self._remotes]
-        return obs
+        return np.stack(obs)
 
     def render(self) -> None:
         for remote in self._remotes:
@@ -120,13 +132,3 @@ class MultiprocessEnvironment:
             process.join()
 
         self._closed = True
-
-
-if __name__ == '__main__':
-    n_envs = 2
-    menv = MultiprocessEnvironment(n_envs)
-    states = menv.reset()
-    for step in range(10000):
-        res = menv.step([1] * n_envs)
-        menv.render()
-    menv.close()
