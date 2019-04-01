@@ -48,9 +48,10 @@ class RecurrentPolicy(nn.Module):
         return x, hxs
 
     def _sample_action(self, actor_features):
-        action_logits = self._actor_linear(actor_features)
-        dist = Categorical(logits=action_logits)
-        action = dist.sample()
-        action_log_prob = dist.log_prob(action)
-        action_entropy = dist.entropy().mean()
+        actor_out = self._actor_linear(actor_features)
+        action_logits = nn.functional.log_softmax(actor_out, dim=1)
+        distribution = Categorical(logits=action_logits)
+        action = distribution.sample()
+        action_log_prob = distribution.log_prob(action)
+        action_entropy = distribution.entropy().mean()
         return action, action_log_prob, action_entropy
