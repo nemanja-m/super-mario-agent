@@ -6,6 +6,7 @@ import cv2
 import gym
 import gym_super_mario_bros
 import numpy as np
+import torch
 from gym_super_mario_bros import actions
 from nes_py.wrappers import BinarySpaceToDiscreteSpaceEnv
 
@@ -106,16 +107,16 @@ class MultiprocessEnvironment:
 
         observations, rewards, dones, infos = zip(*[remote.recv()
                                                     for remote in self._remotes])
-        return (np.stack(observations),
-                np.stack(rewards),
-                np.stack(dones),
+        return (torch.from_numpy(np.stack(observations)),
+                torch.from_numpy(np.stack(rewards)),
+                torch.from_numpy(np.stack(dones).astype(np.uint8)),
                 np.stack(infos))
 
     def reset(self):
         for remote in self._remotes:
             remote.send(('reset', None))
         obs = [remote.recv() for remote in self._remotes]
-        return np.stack(obs)
+        return torch.from_numpy(np.stack(obs))
 
     def render(self) -> None:
         for remote in self._remotes:

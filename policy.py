@@ -1,10 +1,12 @@
+import torch
 import torch.nn as nn
 from torch.distributions import Categorical
 
 
 class Flatten(nn.Module):
-    def forward(self, x):
-        return x.view(x.size(0), -1)
+    def forward(self, x, action_reward_vector):
+        out = x.view(x.size(0), -1)
+        return torch.cat((out, action_reward_vector), dim=1)
 
 
 class RecurrentPolicy(nn.Module):
@@ -20,25 +22,34 @@ class RecurrentPolicy(nn.Module):
             nn.Conv2d(32, 64, 4, stride=2),
             nn.ReLU(),
             nn.Conv2d(64, 32, 3, stride=1),
-            nn.ReLU(),
-            Flatten(),
-            nn.Linear(32 * 11 * 12, hidden_layer_size),
+            nn.ReLU())
+        self._flatten = Flatten()
+        self._linear = nn.Sequential(
+            nn.Linear(32 * 11 * 12 + action_space_size + 1, hidden_layer_size),
             nn.ReLU()
         )
         self._gru = nn.GRU(input_size=hidden_layer_size, hidden_size=hidden_layer_size)
         self._critic_linear = nn.Linear(hidden_layer_size, 1)
         self._actor_linear = nn.Linear(hidden_layer_size, action_space_size)
-
+        self._action_space_size = action_space_size
         self.train()
 
-    def act(self, inputs, rnn_hxs, masks):
-        value, actor_features, rnn_hxs = self(inputs, rnn_hxs, masks)
+    def act(self, input_states, rnn_hxs, masks, prev_actions, prev_rewards):
+        action_reward_vector = self._create_action_reward_vector(prev_actions,
+                                                                 prev_rewards)
+        value, actor_features, rnn_hxs = self(input_states,
+                                              rnn_hxs,
+                                              masks,
+                                              action_reward_vector)
+
         action, action_log_prob, action_entropy = self._sample_action(actor_features)
         return value, action, action_log_prob, action_entropy, rnn_hxs
 
-    def forward(self, inputs, rnn_hxs, masks):
-        cnn_out = self._cnn(inputs / 255.0)
-        x, rnn_hxs = self._forward_gru(cnn_out, rnn_hxs, masks)
+    def forward(self, input_states, rnn_hxs, masks, action_reward_vector):
+        cnn_out = self._cnn(input_states / 255.0)
+        flat_out = self._flatten(cnn_out, action_reward_vector)
+        linear_out = self._linear(flat_out)
+        x, rnn_hxs = self._forward_gru(linear_out, rnn_hxs, masks)
         return self._critic_linear(x), x, rnn_hxs
 
     def _forward_gru(self, x, rnn_hxs, masks):
@@ -54,4 +65,13 @@ class RecurrentPolicy(nn.Module):
         action = distribution.sample()
         action_log_prob = distribution.log_prob(action)
         action_entropy = distribution.entropy().mean()
-        return action, action_log_prob, action_entropy
+        return (action.unsqueeze(-1).long(),
+                action_log_prob.unsqueeze(-1),
+                action_entropy)
+
+    def _create_action_reward_vector(self, prev_actions, prev_rewards):
+        action_reward_vector = torch.zeros(prev_actions.size(0),
+                                           self._action_space_size + 1)
+        action_reward_vector.scatter_(1, prev_actions, 1)  # one-hot encoded actions
+        action_reward_vector[:, -1] = prev_rewards.squeeze(-1)
+        return action_reward_vector
