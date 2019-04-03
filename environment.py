@@ -1,6 +1,5 @@
 import multiprocessing as mp
 from multiprocessing.connection import Connection
-from typing import Iterable
 
 import cv2
 import gym
@@ -85,9 +84,9 @@ def _worker(remote: Connection,
 
 class MultiprocessEnvironment:
 
-    def __init__(self, n_envs: int):
+    def __init__(self, num_envs: int):
         self._closed = False
-        self._remotes, self._work_remotes = zip(*[mp.Pipe() for _ in range(n_envs)])
+        self._remotes, self._work_remotes = zip(*[mp.Pipe() for _ in range(num_envs)])
         self._processes = []
 
         for work_remote, remote in zip(self._work_remotes, self._remotes):
@@ -99,17 +98,17 @@ class MultiprocessEnvironment:
             work_remote.close()
 
         self.action_space_size = env.action_space.n
-        self.state_frame_channels = env.observation_space.shape[0]
+        self.observation_shape = env.observation_space.shape
 
-    def step(self, actions: Iterable[int]):
+    def step(self, actions: torch.Tensor):
         for remote, action in zip(self._remotes, actions):
-            remote.send(('step', action))
+            remote.send(('step', action.item()))
 
         observations, rewards, dones, infos = zip(*[remote.recv()
                                                     for remote in self._remotes])
         return (torch.from_numpy(np.stack(observations)),
-                torch.from_numpy(np.stack(rewards)),
-                torch.from_numpy(np.stack(dones).astype(np.uint8)),
+                torch.from_numpy(np.stack(rewards)).unsqueeze(-1),
+                torch.from_numpy(np.stack(dones).astype(np.uint8)).unsqueeze(-1),
                 np.stack(infos))
 
     def reset(self):

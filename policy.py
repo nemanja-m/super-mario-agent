@@ -35,15 +35,30 @@ class RecurrentPolicy(nn.Module):
         self.train()
 
     def act(self, input_states, rnn_hxs, masks, prev_actions, prev_rewards):
+        value, actor_features, rnn_hxs = self._base_forward(input_states,
+                                                            rnn_hxs,
+                                                            masks,
+                                                            prev_actions,
+                                                            prev_rewards)
+        action, action_log_prob, action_entropy = self._sample_action(actor_features)
+        return value, action, action_log_prob, action_entropy, rnn_hxs
+
+    def value(self, input_states, rnn_hxs, masks, prev_actions, prev_rewards):
+        value, _, _ = self._base_forward(input_states,
+                                         rnn_hxs,
+                                         masks,
+                                         prev_actions,
+                                         prev_rewards)
+        return value.detach()
+
+    def _base_forward(self, input_states, rnn_hxs, masks, prev_actions, prev_rewards):
         action_reward_vector = self._create_action_reward_vector(prev_actions,
                                                                  prev_rewards)
         value, actor_features, rnn_hxs = self(input_states,
                                               rnn_hxs,
                                               masks,
                                               action_reward_vector)
-
-        action, action_log_prob, action_entropy = self._sample_action(actor_features)
-        return value, action, action_log_prob, action_entropy, rnn_hxs
+        return value, actor_features, rnn_hxs
 
     def forward(self, input_states, rnn_hxs, masks, action_reward_vector):
         cnn_out = self._cnn(input_states / 255.0)
