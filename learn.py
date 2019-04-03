@@ -9,7 +9,9 @@ from experience import ExperienceStorage
 def learn(num_envs: int = 8,
           total_steps=2048 * 10,
           steps_per_update: int = 2048,
-          recurrent_hidden_state_size: int = 256):
+          recurrent_hidden_state_size: int = 256,
+          discount=0.99,
+          gae_lambda=0.95):
     envs = MultiprocessEnvironment(num_envs=num_envs)
     actor_critic = RecurrentPolicy(state_frame_channels=envs.observation_shape[0],
                                    action_space_size=envs.action_space_size,
@@ -45,8 +47,11 @@ def learn(num_envs: int = 8,
         with torch.no_grad():
             critic_input = experience_storage.get_critic_input()
             next_value = actor_critic.value(*critic_input)
+            experience_storage.compute_returns(next_value,
+                                               discount=discount,
+                                               gae_lambda=gae_lambda)
 
 
 if __name__ == '__main__':
-    cpu_count = mp.cpu_count()
+    cpu_count = mp.cpu_count() // 4
     learn(num_envs=cpu_count)

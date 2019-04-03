@@ -53,3 +53,13 @@ class ExperienceStorage:
 
     def get_critic_input(self):
         return self.get_actor_input(step=-1)
+
+    def compute_returns(self, next_value, discount, gae_lambda):
+        self.value_predictions[-1] = next_value
+        gae = 0
+        for step in reversed(range(self.rewards.size(0))):
+            delta = self.rewards[step] + \
+                discount * self.value_predictions[step + 1] * self.masks[step + 1] - \
+                self.value_predictions[step]
+            gae = delta + discount * gae_lambda * self.masks[step + 1] * gae
+            self.returns[step] = gae + self.value_predictions[step]
