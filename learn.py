@@ -1,14 +1,18 @@
+import multiprocessing as mp
+from pprint import pprint
+
 import torch
 from tqdm import tqdm
-import multiprocessing as mp
+
 from environment import MultiprocessEnvironment
-from policy import RecurrentPolicy
 from experience import ExperienceStorage
+from policy import RecurrentPolicy
+from ppo import PPOAgent
 
 
-def learn(num_envs: int = 8,
-          total_steps=2048 * 10,
-          steps_per_update: int = 2048,
+def learn(num_envs: int,
+          total_steps=512 * 10,
+          steps_per_update: int = 512,
           recurrent_hidden_state_size: int = 256,
           discount=0.99,
           gae_lambda=0.95):
@@ -20,6 +24,8 @@ def learn(num_envs: int = 8,
                                            num_envs,
                                            envs.observation_shape,
                                            recurrent_hidden_state_size)
+    agent = PPOAgent(actor_critic)
+
     initial_observations = envs.reset()
     experience_storage.insert_initial_observations(initial_observations)
 
@@ -50,6 +56,9 @@ def learn(num_envs: int = 8,
             experience_storage.compute_returns(next_value,
                                                discount=discount,
                                                gae_lambda=gae_lambda)
+
+        losses = agent.update(experience_storage)
+        pprint(losses)
 
 
 if __name__ == '__main__':

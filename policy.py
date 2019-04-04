@@ -51,6 +51,23 @@ class RecurrentPolicy(nn.Module):
                                          prev_rewards)
         return value.detach()
 
+    def evaluate_actions(self,
+                         input_states,
+                         rnn_hxs,
+                         masks,
+                         prev_actions,
+                         prev_rewards,
+                         actions):
+        value, actor_features, rnn_hxs = self._base_forward(input_states,
+                                                            rnn_hxs,
+                                                            masks,
+                                                            prev_actions,
+                                                            prev_rewards)
+        distribution = self._action_distribution(actor_features)
+        action_log_probs = distribution.log_prob(actions)
+        action_entropy = distribution.entropy().mean()
+        return value, action_log_probs, action_entropy
+
     def _base_forward(self, input_states, rnn_hxs, masks, prev_actions, prev_rewards):
         action_reward_vector = self._create_action_reward_vector(prev_actions,
                                                                  prev_rewards)
@@ -74,15 +91,19 @@ class RecurrentPolicy(nn.Module):
         return x, hxs
 
     def _sample_action(self, actor_features):
-        actor_out = self._actor_linear(actor_features)
-        action_logits = nn.functional.log_softmax(actor_out, dim=1)
-        distribution = Categorical(logits=action_logits)
+        distribution = self._action_distribution(actor_features)
         action = distribution.sample()
         action_log_prob = distribution.log_prob(action)
         action_entropy = distribution.entropy().mean()
         return (action.unsqueeze(-1).long(),
                 action_log_prob.unsqueeze(-1),
                 action_entropy)
+
+    def _action_distribution(self, actor_features):
+        actor_out = self._actor_linear(actor_features)
+        action_logits = nn.functional.log_softmax(actor_out, dim=1)
+        distribution = Categorical(logits=action_logits)
+        return distribution
 
     def _create_action_reward_vector(self, prev_actions, prev_rewards):
         action_reward_vector = torch.zeros(prev_actions.size(0),
