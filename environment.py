@@ -13,8 +13,8 @@ from nes_py.wrappers import BinarySpaceToDiscreteSpaceEnv
 class ResizeFrameEnvWrapper(gym.ObservationWrapper):
     def __init__(self,
                  env: gym.Env,
-                 width: int = 128,
-                 height: int = 120,
+                 width: int = 96,
+                 height: int = 90,
                  grayscale: bool = False):
         """Resize env frames to width x height.
 
@@ -67,7 +67,8 @@ def _worker(remote: Connection,
                 observation, reward, done, info = env.step(data)
                 if done:
                     observation = env.reset()
-                remote.send((observation, reward, done, info))
+                # Scale reward in range (-1, 1). 15 is the maximum reward.
+                remote.send((observation, reward / 15.0, done, info))
             elif cmd == 'reset':
                 observation = env.reset()
                 remote.send(observation)
