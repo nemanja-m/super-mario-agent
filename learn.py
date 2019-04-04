@@ -12,9 +12,9 @@ from ppo import PPOAgent
 
 def learn(num_envs: int,
           device: torch.device,  # CUDA or CPU
-          total_steps=2048 * 128,
+          total_steps: int = 2048 * 128,
           steps_per_update: int = 2048,
-          recurrent_hidden_state_size: int = 512,
+          recurrent_hidden_state_size: int = 384,
           discount=0.99,
           gae_lambda=0.95):
     envs = MultiprocessEnvironment(num_envs=num_envs)
@@ -34,8 +34,8 @@ def learn(num_envs: int,
 
     num_updates = total_steps // (num_envs * steps_per_update)
 
-    for update in range(num_updates):
-        for step in tqdm(range(steps_per_update)):
+    for update in tqdm(range(num_updates)):
+        for step in range(steps_per_update):
             with torch.no_grad():
                 actor_input = experience_storage.get_actor_input(step)
                 (values,
@@ -65,6 +65,6 @@ def learn(num_envs: int,
 
 
 if __name__ == '__main__':
-    cpu_count = mp.cpu_count() // 4
+    cpu_count = mp.cpu_count()
     device = 'cuda:0' if torch.cuda.is_available() else 'cpu'
     learn(num_envs=cpu_count, device=device)

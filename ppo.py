@@ -14,7 +14,7 @@ class PPOAgent:
                  lr: float = 7e-4,
                  clip_threshold: float = 0.2,
                  epochs: int = 4,
-                 minibatches: int = 2,
+                 minibatches: int = 4,
                  value_loss_coef: float = 0.5,
                  entropy_coef: float = 0.01,
                  max_grad_norm: float = 0.5):

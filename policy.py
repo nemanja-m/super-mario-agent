@@ -26,7 +26,7 @@ class RecurrentPolicy(nn.Module):
             nn.ReLU())
         self._flatten = Flatten()
         self._linear = nn.Sequential(
-            nn.Linear(32 * 11 * 12 + action_space_size + 1, hidden_layer_size),
+            nn.Linear(32 * 7 * 8 + action_space_size + 1, hidden_layer_size),
             nn.ReLU()
         )
         self._gru = nn.GRU(input_size=hidden_layer_size, hidden_size=hidden_layer_size)
@@ -89,9 +89,49 @@ class RecurrentPolicy(nn.Module):
         return self._critic_linear(x), x, rnn_hxs
 
     def _forward_gru(self, x, rnn_hxs, masks):
-        x, hxs = self._gru(x.unsqueeze(0), (rnn_hxs * masks).unsqueeze(0))
-        x = x.squeeze(0)
-        hxs = hxs.squeeze(0)
+        if x.size(0) == rnn_hxs.size(0):
+            x, hxs = self._gru(x.unsqueeze(0), (rnn_hxs * masks).unsqueeze(0))
+            x = x.squeeze(0)
+            hxs = hxs.squeeze(0)
+        else:
+            num_envs_per_batch = rnn_hxs.size(0)
+            steps_per_update = int(x.size(0) / num_envs_per_batch)
+
+            x = x.view(steps_per_update, num_envs_per_batch, x.size(1))
+            masks = masks.view(steps_per_update, num_envs_per_batch)
+
+            # Figure out which steps in the sequence have a zero for any agent
+            # Always assume t=0 has a zero in it as that makes the logic
+            # cleaner.
+            has_zeros = ((masks[1:] == 0.0)
+                         .any(dim=-1)
+                         .nonzero()
+                         .squeeze()
+                         .cpu())
+
+            # +1 to correct the masks[1:]
+            if has_zeros.dim() == 0:
+                has_zeros = [has_zeros.item() + 1]
+            else:
+                has_zeros = (has_zeros + 1).numpy().tolist()
+
+            # Add t=0 and t=T to the list
+            has_zeros = [0] + has_zeros + [steps_per_update]
+
+            hxs = rnn_hxs.unsqueeze(0)
+            outputs = []
+            for i in range(len(has_zeros) - 1):
+                # Process steps that don't have any zeros in masks together.
+                start_idx = has_zeros[i]
+                end_idx = has_zeros[i + 1]
+
+                rnn_scores, hxs = self._gru(x[start_idx:end_idx],
+                                            hxs * masks[start_idx].view(1, -1, 1))
+                outputs.append(rnn_scores)
+
+            x = torch.cat(outputs, dim=0).view(steps_per_update * num_envs_per_batch, -1)
+            hxs = hxs.squeeze(0)
+
         return x, hxs
 
     def _sample_action(self, actor_features):
