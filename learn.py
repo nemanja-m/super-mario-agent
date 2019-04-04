@@ -11,7 +11,7 @@ from ppo import PPOAgent
 
 def learn(num_envs: int,
           device: torch.device,  # CUDA or CPU
-          total_steps: int = 2048 * 128,
+          total_steps: int = 2048 * 8 * 512,
           steps_per_update: int = 2048,
           recurrent_hidden_state_size: int = 384,
           discount=0.99,
