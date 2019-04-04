@@ -46,21 +46,23 @@ class ExperienceStorage:
                  num_steps: int,
                  num_envs: int,
                  observation_shape: Tuple,
-                 recurrent_hidden_state_size: int):
+                 recurrent_hidden_state_size: int,
+                 device: torch.device):
         self._num_steps = num_steps
         self._num_envs = num_envs
         self._step = 0
+        self._device = device
 
-        self.observations = torch.zeros(num_steps + 1, num_envs, *observation_shape)
-        self.actions = torch.zeros(num_steps, num_envs, 1, dtype=torch.long)
-        self.action_log_probs = torch.zeros(num_steps, num_envs, 1)
-        self.rewards = torch.zeros(num_steps, num_envs, 1)
-        self.value_predictions = torch.zeros(num_steps + 1, num_envs, 1)
-        self.returns = torch.zeros(num_steps + 1, num_envs, 1)
-        self.masks = torch.ones(num_steps + 1, num_envs, 1)
-        self.recurrent_hidden_states = torch.zeros(num_steps + 1,
-                                                   num_envs,
-                                                   recurrent_hidden_state_size)
+        self.observations = torch.zeros(num_steps + 1, num_envs,
+                                        *observation_shape).to(device)
+        self.actions = torch.zeros(num_steps, num_envs, 1, dtype=torch.long).to(device)
+        self.action_log_probs = torch.zeros(num_steps, num_envs, 1).to(device)
+        self.rewards = torch.zeros(num_steps, num_envs, 1).to(device)
+        self.value_predictions = torch.zeros(num_steps + 1, num_envs, 1).to(device)
+        self.returns = torch.zeros(num_steps + 1, num_envs, 1).to(device)
+        self.masks = torch.ones(num_steps + 1, num_envs, 1).to(device)
+        self.recurrent_hidden_states = torch.zeros(
+            num_steps + 1, num_envs, recurrent_hidden_state_size).to(device)
 
     def insert(self,
                observations,
@@ -125,10 +127,11 @@ class ExperienceStorage:
             end = start + num_envs_per_batch
             indices = random_env_indices[start:end]
 
-            prev_actions = torch.zeros(self._num_steps, num_envs_per_batch, 1)
+            one_item_shape = (self._num_steps, num_envs_per_batch, 1)
+            prev_actions = torch.zeros(*one_item_shape).to(self._device)
             prev_actions[1:, :] = self.actions[:-1, indices]
 
-            prev_rewards = torch.zeros(self._num_steps, num_envs_per_batch, 1)
+            prev_rewards = torch.zeros(*one_item_shape).to(self._device)
             prev_rewards[1:, :] = self.rewards[:-1, indices]
 
             yield ExperienceBatch(

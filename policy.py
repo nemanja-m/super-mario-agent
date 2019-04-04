@@ -13,7 +13,8 @@ class RecurrentPolicy(nn.Module):
     def __init__(self,
                  state_frame_channels: int,
                  action_space_size: int,
-                 hidden_layer_size: int = 512):
+                 hidden_layer_size: int,
+                 device: torch.device):
         super().__init__()
 
         self._cnn = nn.Sequential(
@@ -33,6 +34,9 @@ class RecurrentPolicy(nn.Module):
         self._actor_linear = nn.Linear(hidden_layer_size, action_space_size)
         self._action_space_size = action_space_size
         self.train()
+
+        self._device = device
+        self.to(device)
 
     def act(self, input_states, rnn_hxs, masks, prev_actions, prev_rewards):
         value, actor_features, rnn_hxs = self._base_forward(input_states,
@@ -106,8 +110,10 @@ class RecurrentPolicy(nn.Module):
         return distribution
 
     def _create_action_reward_vector(self, prev_actions, prev_rewards):
-        action_reward_vector = torch.zeros(prev_actions.size(0),
-                                           self._action_space_size + 1)
+        action_reward_vector = torch.zeros(
+            prev_actions.size(0),
+            self._action_space_size + 1
+        ).to(self._device)
         action_reward_vector.scatter_(1, prev_actions, 1)  # one-hot encoded actions
         action_reward_vector[:, -1] = prev_rewards.squeeze(-1)
         return action_reward_vector
