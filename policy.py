@@ -82,7 +82,7 @@ class RecurrentPolicy(nn.Module):
         return value, actor_features, rnn_hxs
 
     def forward(self, input_states, rnn_hxs, masks, action_reward_vector):
-        cnn_out = self._cnn(input_states / 255.0)
+        cnn_out = self._cnn(input_states.type(torch.float32) / 255.0)
         flat_out = self._flatten(cnn_out, action_reward_vector)
         linear_out = self._linear(flat_out)
         x, rnn_hxs = self._forward_gru(linear_out, rnn_hxs, masks)

@@ -53,8 +53,10 @@ class ExperienceStorage:
         self._step = 0
         self._device = device
 
-        self.observations = torch.zeros(num_steps + 1, num_envs,
-                                        *observation_shape).to(device)
+        self.observations = torch.zeros(num_steps + 1,
+                                        num_envs,
+                                        *observation_shape,
+                                        dtype=torch.uint8).to(device)
         self.actions = torch.zeros(num_steps, num_envs, 1, dtype=torch.long).to(device)
         self.action_log_probs = torch.zeros(num_steps, num_envs, 1).to(device)
         self.rewards = torch.zeros(num_steps, num_envs, 1).to(device)

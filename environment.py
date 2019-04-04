@@ -46,7 +46,7 @@ class ResizeFrameEnvWrapper(gym.ObservationWrapper):
             frame = frame[:, :, None]
 
         # pytorch uses channel first images
-        return frame.transpose(2, 0, 1).astype(np.float32)
+        return frame.transpose(2, 0, 1)
 
 
 def _create_environment(env_name: str='SuperMarioBrosRandomStages-v0') -> gym.Env:

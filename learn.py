@@ -1,5 +1,4 @@
 import multiprocessing as mp
-from pprint import pprint
 
 import torch
 from tqdm import tqdm
@@ -61,7 +60,7 @@ def learn(num_envs: int,
                                                gae_lambda=gae_lambda)
 
         losses = agent.update(experience_storage)
-        pprint(losses)
+        print(experience_storage.rewards.mean())
 
 
 if __name__ == '__main__':
