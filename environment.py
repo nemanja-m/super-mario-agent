@@ -51,7 +51,7 @@ class ResizeFrameEnvWrapper(gym.ObservationWrapper):
 
 def create_environment(env_name: str = 'SuperMarioBros-v0') -> gym.Env:
     env = gym_super_mario_bros.make(env_name)
-    env = ResizeFrameEnvWrapper(env)
+    env = ResizeFrameEnvWrapper(env, grayscale=True)
     env = BinarySpaceToDiscreteSpaceEnv(env, actions.COMPLEX_MOVEMENT)
     return env
 

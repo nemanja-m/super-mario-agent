@@ -9,7 +9,6 @@ class ExperienceBatch:
                  observations,
                  actions,
                  prev_actions,
-                 prev_rewards,
                  action_log_probs,
                  returns,
                  value_predictions,
@@ -20,7 +19,6 @@ class ExperienceBatch:
         self.observations = self._flatten(observations, num_steps, num_envs)
         self.actions = self._flatten(actions, num_steps, num_envs)
         self.prev_actions = self._flatten(prev_actions, num_steps, num_envs)
-        self.prev_rewards = self._flatten(prev_rewards, num_steps, num_envs)
         self.action_log_probs = self._flatten(action_log_probs, num_steps, num_envs)
         self.returns = self._flatten(returns, num_steps, num_envs)
         self.value_predictions = self._flatten(value_predictions, num_steps, num_envs)
@@ -33,7 +31,6 @@ class ExperienceBatch:
                 self.recurrent_hidden_states,
                 self.masks,
                 self.prev_actions,
-                self.prev_rewards,
                 self.actions)
 
     def _flatten(self, tensor, num_steps, num_envs):
@@ -46,7 +43,7 @@ class ExperienceStorage:
                  num_steps: int,
                  num_envs: int,
                  observation_shape: Tuple,
-                 recurrent_hidden_state_size: int,
+                 recurrent_hidden_size: int,
                  device: torch.device):
         self._num_steps = num_steps
         self._num_envs = num_envs
@@ -64,7 +61,7 @@ class ExperienceStorage:
         self.returns = torch.zeros(num_steps + 1, num_envs, 1).to(device)
         self.masks = torch.ones(num_steps + 1, num_envs, 1).to(device)
         self.recurrent_hidden_states = torch.zeros(
-            num_steps + 1, num_envs, recurrent_hidden_state_size).to(device)
+            num_steps + 1, num_envs, recurrent_hidden_size).to(device)
 
     def insert(self,
                observations,
@@ -90,9 +87,13 @@ class ExperienceStorage:
         states = self.observations[step]
         rnn_hxs = self.recurrent_hidden_states[step]
         masks = self.masks[step]
-        prev_actions = self.actions[step - 1]
-        prev_rewards = self.rewards[step - 1]
-        return states, rnn_hxs, masks, prev_actions, prev_rewards
+        prev_actions = self.get_prev_actions(step)
+        return states, rnn_hxs, masks, prev_actions
+
+    def get_prev_actions(self, step, last_n=4):
+        prev_action_indices = [step - i for i in range(1, last_n + 1)]
+        prev_actions = self.actions[prev_action_indices, :].permute(1, 0, 2)
+        return prev_actions
 
     def get_critic_input(self):
         return self.get_actor_input(step=-1)
@@ -129,18 +130,18 @@ class ExperienceStorage:
             end = start + num_envs_per_batch
             indices = random_env_indices[start:end]
 
-            one_item_shape = (self._num_steps, num_envs_per_batch, 1)
-            prev_actions = torch.zeros(*one_item_shape).to(self._device)
-            prev_actions[1:, :] = self.actions[:-1, indices]
+            prev_actions_shape = (self._num_steps, num_envs_per_batch, 4, 1)
+            prev_actions = torch.zeros(*prev_actions_shape,
+                                       dtype=torch.long).to(self._device)
 
-            prev_rewards = torch.zeros(*one_item_shape).to(self._device)
-            prev_rewards[1:, :] = self.rewards[:-1, indices]
+            for step in range(self._num_steps):
+                actions = self.get_prev_actions(step)
+                prev_actions[step, :] = actions[indices]
 
             yield ExperienceBatch(
                 observations=self.observations[:-1, indices],
                 actions=self.actions[:, indices],
-                prev_actions=prev_actions.type(torch.long),
-                prev_rewards=prev_rewards,
+                prev_actions=prev_actions,
                 action_log_probs=self.action_log_probs[:, indices],
                 returns=self.returns[:-1, indices],
                 value_predictions=self.value_predictions[:-1, indices],

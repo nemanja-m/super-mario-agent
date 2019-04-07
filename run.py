@@ -8,6 +8,8 @@ from policy import RecurrentPolicy
 
 
 HIDDEN_LAYER_SIZE = 512
+PREV_ACTIONS_HIDDEN_SIZE = 128
+RECURRENT_HIDDEN_SIZE = 64
 
 _root_dir = os.path.dirname(os.path.abspath(__file__))
 MODEL_PATH = os.path.join(_root_dir, 'models', 'latest.bin')
@@ -25,6 +27,8 @@ def run(hidden_layer_size: int, model_path: str, level: str):
     actor_critic = RecurrentPolicy(state_frame_channels=env.observation_space.shape[0],
                                    action_space_size=env.action_space.n,
                                    hidden_layer_size=hidden_layer_size,
+                                   prev_actions_out_size=PREV_ACTIONS_HIDDEN_SIZE,
+                                   recurrent_hidden_size=RECURRENT_HIDDEN_SIZE,
                                    device=torch.device('cpu'))
     actor_critic.load_state_dict(torch.load(model_path, map_location='cpu'))
 

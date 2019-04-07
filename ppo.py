@@ -4,14 +4,14 @@ import torch
 import torch.nn as nn
 
 from experience import ExperienceStorage
-from policy import RecurrentPolicy
+from policy import BasePolicy
 
 
 class PPOAgent:
 
     def __init__(self,
-                 actor_critic: RecurrentPolicy,
-                 lr: float = 7e-4,
+                 actor_critic: BasePolicy,
+                 lr: float = 7.5e-4,
                  clip_threshold: float = 0.2,
                  epochs: int = 4,
                  minibatches: int = 4,
