@@ -49,7 +49,7 @@ class ResizeFrameEnvWrapper(gym.ObservationWrapper):
         return frame.transpose(2, 0, 1)
 
 
-def _create_environment(env_name: str='SuperMarioBrosRandomStages-v0') -> gym.Env:
+def create_environment(env_name: str = 'SuperMarioBros-v0') -> gym.Env:
     env = gym_super_mario_bros.make(env_name)
     env = ResizeFrameEnvWrapper(env)
     env = BinarySpaceToDiscreteSpaceEnv(env, actions.COMPLEX_MOVEMENT)
@@ -91,7 +91,7 @@ class MultiprocessEnvironment:
         self._processes = []
 
         for work_remote, remote in zip(self._work_remotes, self._remotes):
-            env = _create_environment()
+            env = create_environment()
             args = (work_remote, remote, env)
             process = mp.Process(target=_worker, args=args, daemon=True)
             process.start()
