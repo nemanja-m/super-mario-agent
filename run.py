@@ -33,10 +33,9 @@ def run(hidden_layer_size: int, model_path: str, level: str):
     actor_critic.load_state_dict(torch.load(model_path, map_location='cpu'))
 
     observation = env.reset()
-    rnn_hxs = torch.zeros(1, hidden_layer_size)
+    rnn_hxs = torch.zeros(1, RECURRENT_HIDDEN_SIZE)
     masks = torch.zeros(1, 1)
-    prev_actions = torch.zeros(1, 1, dtype=torch.long)
-    prev_rewards = torch.zeros(1, 1)
+    prev_actions = torch.zeros(1, 4, 1, dtype=torch.long)
 
     try:
         while True:
@@ -45,12 +44,11 @@ def run(hidden_layer_size: int, model_path: str, level: str):
                 value, action, _, _, rnn_hxs = actor_critic.act(observation,
                                                                 rnn_hxs,
                                                                 masks,
-                                                                prev_actions,
-                                                                prev_rewards)
+                                                                prev_actions)
             observation, reward, done, _ = env.step(action.flatten().item())
             masks = 1 - torch.tensor(done, dtype=torch.uint8)
-            prev_actions = action
-            prev_rewards = torch.tensor([reward]).unsqueeze(0)
+            prev_actions = torch.roll(prev_actions, 1, dims=1)
+            prev_actions[0, -1, 0] = action.item()
 
             if done:
                 observation = env.reset()
