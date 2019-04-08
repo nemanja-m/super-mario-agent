@@ -49,8 +49,40 @@ class ResizeFrameEnvWrapper(gym.ObservationWrapper):
         return frame.transpose(2, 0, 1)
 
 
+class StochasticFrameSkipEnvWrapper(gym.Wrapper):
+
+    def __init__(self, env, n_frames, stick_prob):
+        super().__init__(env)
+        self.n_frames = n_frames
+        self.stick_prob = stick_prob
+        self.current_action = None
+        self.rng = np.random.RandomState()
+
+    def reset(self, **kwargs):
+        self.current_action = None
+        return self.env.reset(**kwargs)
+
+    def step(self, action):
+        done = False
+        total_reward = 0
+        for frame in range(self.n_frames):
+            if self.current_action is None:
+                self.current_action = action
+            elif frame == 0:
+                if self.rng.rand() > self.stick_prob:
+                    self.current_action = action
+            elif frame == 1:
+                self.current_action = action
+            observation, reward, done, info = self.env.step(self.current_action)
+            total_reward += reward
+            if done:
+                break
+        return observation, total_reward, done, info
+
+
 def create_environment(env_name: str = 'SuperMarioBros-v0') -> gym.Env:
     env = gym_super_mario_bros.make(env_name)
+    env = StochasticFrameSkipEnvWrapper(env, n_frames=4, stick_prob=0.25)
     env = ResizeFrameEnvWrapper(env, grayscale=True)
     env = BinarySpaceToDiscreteSpaceEnv(env, actions.COMPLEX_MOVEMENT)
     return env
