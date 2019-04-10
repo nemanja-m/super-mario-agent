@@ -1,4 +1,5 @@
 import multiprocessing as mp
+from collections import deque
 from multiprocessing.connection import Connection
 
 import cv2
@@ -49,35 +50,38 @@ class ResizeFrameEnvWrapper(gym.ObservationWrapper):
         return frame.transpose(2, 0, 1)
 
 
-class StochasticFrameSkipEnvWrapper(gym.Wrapper):
+class BufferFrameEnvWrapper(gym.Wrapper):
 
-    def __init__(self, env, n_frames, stick_prob):
+    def __init__(self, env: gym.Env, n_frames: int = 4):
         super().__init__(env)
-        self.n_frames = n_frames
-        self.stick_prob = stick_prob
-        self.current_action = None
-        self.rng = np.random.RandomState()
-
-    def reset(self, **kwargs):
-        self.current_action = None
-        return self.env.reset(**kwargs)
+        _, height, width = env.observation_space.shape
+        observation_shape = (n_frames, height, width)
+        self.observation_space = gym.spaces.Box(low=0, high=255,
+                                                shape=observation_shape,
+                                                dtype=np.uint8)
+        self._buffer = deque(maxlen=n_frames)
+        self._n_frames = n_frames
 
     def step(self, action):
-        done = False
-        total_reward = 0
-        for frame in range(self.n_frames):
-            if self.current_action is None:
-                self.current_action = action
-            elif frame == 0:
-                if self.rng.rand() > self.stick_prob:
-                    self.current_action = action
-            elif frame == 1:
-                self.current_action = action
-            observation, reward, done, info = self.env.step(self.current_action)
-            total_reward += reward
-            if done:
-                break
-        return observation, total_reward, done, info
+        observation, reward, done, info = self.env.step(action)
+        self._buffer.append(observation)
+        total_reward = reward
+        for _ in range(self._n_frames - 1):
+            if not done:
+                observation, reward, done, info = self.env.step(action)
+                total_reward += reward
+            self._buffer.append(observation)
+        return self._get_stacked_observations(), total_reward, done, info
+
+    def reset(self):
+        self._buffer.clear()
+        observation = self.env.reset()
+        for _ in range(self._n_frames):
+            self._buffer.append(observation)
+        return self._get_stacked_observations()
+
+    def _get_stacked_observations(self):
+        return np.stack(self._buffer, axis=0).reshape(self.observation_space.shape)
 
 
 class ReshapeRewardEnvWrapper(gym.Wrapper):
@@ -106,8 +110,8 @@ class ReshapeRewardEnvWrapper(gym.Wrapper):
 
 def create_environment(env_name: str = 'SuperMarioBros-v0') -> gym.Env:
     env = gym_super_mario_bros.make(env_name)
-    env = StochasticFrameSkipEnvWrapper(env, n_frames=4, stick_prob=0.25)
     env = ResizeFrameEnvWrapper(env, grayscale=True)
+    env = BufferFrameEnvWrapper(env, n_frames=4)
     env = ReshapeRewardEnvWrapper(env)
     env = BinarySpaceToDiscreteSpaceEnv(env, actions.COMPLEX_MOVEMENT)
     return env
