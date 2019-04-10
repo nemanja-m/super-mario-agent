@@ -1,8 +1,9 @@
 import multiprocessing as mp
-from collections import deque, OrderedDict
+from collections import deque
 
 import numpy as np
 import torch
+from tensorboardX import SummaryWriter
 from tqdm import tqdm
 
 from environment import MultiprocessEnvironment
@@ -16,10 +17,10 @@ MAX_X = 3161
 
 def learn(num_envs: int,
           device: torch.device,  # CUDA or CPU
-          total_steps: int = 256 * 8 * 2048,
-          steps_per_update: int = 256,
+          total_steps: int = 512 * 8 * 2048,
+          steps_per_update: int = 512,
           hidden_layer_size: int = 512,
-          recurrent_hidden_size: int = 512,
+          recurrent_hidden_size: int = 256,
           discount=0.98,
           gae_lambda=0.95,
           save_interval=128):
@@ -42,6 +43,7 @@ def learn(num_envs: int,
 
     num_updates = total_steps // (num_envs * steps_per_update)
     episode_rewards = deque(maxlen=16)
+    tb_writer = SummaryWriter()
 
     for update_step in tqdm(range(num_updates)):
         for step in range(steps_per_update):
@@ -81,29 +83,30 @@ def learn(num_envs: int,
         if episode_rewards:
             with torch.no_grad():
                 cumulative_reward = experience_storage.rewards.sum((0, 2))
-                mean_reward = cumulative_reward.mean().item()
-                std_reward = cumulative_reward.std().item()
+                mean_reward = cumulative_reward.mean()
+                std_reward = cumulative_reward.std()
 
-            print('\n')
-            metrics = OrderedDict([
-                ('min_x', np.min(episode_rewards)),
-                ('max_x', np.max(episode_rewards)),
-                ('mean_x', np.mean(episode_rewards)),
-                ('median_x', np.median(episode_rewards)),
-                ('mean_reward', mean_reward),
-                ('std_reward', std_reward),
-                ('value_loss', losses['value_loss']),
-                ('policy_loss', losses['policy_loss']),
-                ('action_dist_entropy', losses['action_dist_entropy'])
-            ])
-            for metric, value in metrics.items():
-                print('{}: {:.3f}'.format(metric, value))
-            print()
+            tb_writer.add_scalars('mario/level_progress', {
+                'min': np.min(episode_rewards),
+                'max': np.max(episode_rewards),
+                'mean': np.mean(episode_rewards),
+                'median': np.median(episode_rewards),
+            }, update_step)
+
+            tb_writer.add_scalars('mario/reward', {'mean': mean_reward,
+                                                   'std': std_reward}, update_step)
+            tb_writer.add_scalars('mario/loss', {
+                'policy': losses['policy_loss'],
+                'value': losses['value_loss'],
+                'action_dist_entropy': losses['action_dist_entropy']
+            }, update_step)
 
         save_model = (update_step % save_interval) == (save_interval - 1)
         if save_model:
             model_path = 'models/model_{}.bin'.format(update_step + 1)
             torch.save(actor_critic.state_dict(), model_path)
+
+    tb_writer.close()
 
 
 if __name__ == '__main__':

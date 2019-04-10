@@ -105,3 +105,6 @@ venv.bak/
 
 # trained models
 *.bin
+
+# tensorboard runs
+/runs
