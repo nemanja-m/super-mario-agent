@@ -3,6 +3,22 @@ import torch.nn as nn
 from torch.distributions import Categorical
 
 
+def _init_module_weights(module: nn.Module, gain='relu') -> nn.Module:
+    gain_init = 1 if gain == 'constant' else nn.init.calculate_gain(gain)
+    nn.init.orthogonal_(module.weight.data, gain=gain_init)
+    nn.init.constant_(module.bias.data, 0)
+    return module
+
+
+def _init_gru(gru_module):
+    for name, param in gru_module.named_parameters():
+        if 'bias' in name:
+            nn.init.constant_(param, 0)
+        elif 'weight' in name:
+            nn.init.orthogonal_(param)
+    return gru_module
+
+
 class Flatten(nn.Module):
     def forward(self, x):
         return x.view(x.size(0), -1)
@@ -24,22 +40,25 @@ class BasePolicy(nn.Module):
         self.is_recurrent = False
 
         self._cnn = nn.Sequential(
-            nn.Conv2d(state_frame_channels, 32, 8, stride=4),
+            _init_module_weights(nn.Conv2d(state_frame_channels, 32, 8, stride=4)),
             nn.ReLU(),
-            nn.Conv2d(32, 64, 4, stride=2),
+            _init_module_weights(nn.Conv2d(32, 64, 4, stride=2)),
             nn.ReLU(),
-            nn.Conv2d(64, 32, 3, stride=1),
+            _init_module_weights(nn.Conv2d(64, 32, 3, stride=1)),
             nn.ReLU())
+
         self._flatten = Flatten()
 
         # Last 4 actions are stacked.
         self._prev_action_linear = nn.Sequential(
-            nn.Linear(4 * action_space_size, prev_actions_out_size),
+            _init_module_weights(nn.Linear(4 * action_space_size,
+                                           prev_actions_out_size)),
             nn.ReLU()
         )
 
         self._linear = nn.Sequential(
-            nn.Linear(32 * 7 * 8 + prev_actions_out_size, hidden_layer_size),
+            _init_module_weights(nn.Linear(32 * 7 * 8 + prev_actions_out_size,
+                                           hidden_layer_size)),
             nn.ReLU()
         )
 
@@ -128,8 +147,14 @@ class NonRecurrentPolicy(BasePolicy):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
-        self._critic_linear = nn.Linear(self._hidden_layer_size, 1)
-        self._actor_linear = nn.Linear(self._hidden_layer_size, self._action_space_size)
+        self._critic_linear = _init_module_weights(
+            nn.Linear(self._hidden_layer_size, 1),
+            gain='constant'
+        )
+        self._actor_linear = _init_module_weights(
+            nn.Linear(self._hidden_layer_size, self._action_space_size),
+            gain='constant'
+        )
         self.to(self._device)
 
 
@@ -139,12 +164,16 @@ class RecurrentPolicy(BasePolicy):
         self._recurrent_hidden_size = kwargs.pop('recurrent_hidden_size')
         super().__init__(*args, **kwargs)
 
-        self._gru = nn.GRU(input_size=self._hidden_layer_size,
-                           hidden_size=self._recurrent_hidden_size)
-
-        self._critic_linear = nn.Linear(self._recurrent_hidden_size, 1)
-        self._actor_linear = nn.Linear(self._recurrent_hidden_size,
-                                       self._action_space_size)
+        self._gru = _init_gru(nn.GRU(input_size=self._hidden_layer_size,
+                                     hidden_size=self._recurrent_hidden_size))
+        self._critic_linear = _init_module_weights(
+            nn.Linear(self._recurrent_hidden_size, 1),
+            gain='constant'
+        )
+        self._actor_linear = _init_module_weights(
+            nn.Linear(self._recurrent_hidden_size, self._action_space_size),
+            gain='constant'
+        )
         self.is_recurrent = True
         self.to(self._device)
 
