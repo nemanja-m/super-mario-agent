@@ -9,7 +9,7 @@ from policy import RecurrentPolicy
 
 HIDDEN_LAYER_SIZE = 512
 PREV_ACTIONS_HIDDEN_SIZE = 128
-RECURRENT_HIDDEN_SIZE = 64
+RECURRENT_HIDDEN_SIZE = 512
 
 _root_dir = os.path.dirname(os.path.abspath(__file__))
 MODEL_PATH = os.path.join(_root_dir, 'models', 'latest.bin')

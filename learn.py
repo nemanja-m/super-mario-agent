@@ -16,18 +16,18 @@ MAX_X = 3161
 
 def learn(num_envs: int,
           device: torch.device,  # CUDA or CPU
-          total_steps: int = 512 * 8 * 2048,
-          steps_per_update: int = 512,
+          total_steps: int = 256 * 8 * 2048,
+          steps_per_update: int = 256,
           hidden_layer_size: int = 512,
           recurrent_hidden_size: int = 512,
           discount=0.98,
           gae_lambda=0.95,
-          save_interval=256):
+          save_interval=128):
     envs = MultiprocessEnvironment(num_envs=num_envs)
     actor_critic = RecurrentPolicy(state_frame_channels=envs.observation_shape[0],
                                    action_space_size=envs.action_space_size,
                                    hidden_layer_size=hidden_layer_size,
-                                   prev_actions_out_size=64,
+                                   prev_actions_out_size=128,
                                    recurrent_hidden_size=recurrent_hidden_size,
                                    device=device)
     experience_storage = ExperienceStorage(num_steps=steps_per_update,
@@ -85,17 +85,17 @@ def learn(num_envs: int,
                 std_reward = cumulative_reward.std().item()
 
             print('\n')
-            metrics = OrderedDict(
-                mean_x=np.mean(episode_rewards),
-                median_x=np.median(episode_rewards),
-                max_x=np.max(episode_rewards),
-                min_x=np.min(episode_rewards),
-                mean_reward=mean_reward,
-                std_reward=std_reward,
-                policy_loss=losses['policy_loss'],
-                value_loss=losses['value_loss'],
-                action_dist_entropy=losses['action_dist_entropy']
-            )
+            metrics = OrderedDict([
+                ('min_x', np.min(episode_rewards)),
+                ('max_x', np.max(episode_rewards)),
+                ('mean_x', np.mean(episode_rewards)),
+                ('median_x', np.median(episode_rewards)),
+                ('mean_reward', mean_reward),
+                ('std_reward', std_reward),
+                ('value_loss', losses['value_loss']),
+                ('policy_loss', losses['policy_loss']),
+                ('action_dist_entropy', losses['action_dist_entropy'])
+            ])
             for metric, value in metrics.items():
                 print('{}: {:.3f}'.format(metric, value))
             print()

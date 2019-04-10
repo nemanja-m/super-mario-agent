@@ -50,6 +50,27 @@ class ResizeFrameEnvWrapper(gym.ObservationWrapper):
         return frame.transpose(2, 0, 1)
 
 
+class NormalizeFrameEnvWrapper(gym.ObservationWrapper):
+
+    def __init__(self, env, alpha: float=0.9999):
+        super().__init__(env)
+        self._state_mean = 0
+        self._state_std = 0
+        self._alpha = alpha
+        self._num_steps = 0
+
+    def observation(self, observation):
+        self._num_steps += 1
+        self._state_mean = self._state_mean * self._alpha + \
+            observation.mean() * (1 - self._alpha)
+        self._state_std = self._state_std * self._alpha + \
+            observation.std() * (1 - self._alpha)
+
+        unbiased_mean = self._state_mean / (1 - pow(self._alpha, self._num_steps))
+        unbiased_std = self._state_std / (1 - pow(self._alpha, self._num_steps))
+        return (observation - unbiased_mean) / (unbiased_std + 1e-8)
+
+
 class BufferFrameEnvWrapper(gym.Wrapper):
 
     def __init__(self, env: gym.Env, n_frames: int = 4):
@@ -101,18 +122,20 @@ class ReshapeRewardEnvWrapper(gym.Wrapper):
         if done:
             reward += 50 if info['flag_get'] else -50
 
-        reward = np.clip(reward, -15, 15)
+        # Scale reward to [-1, 1].
+        reward = np.clip(reward, -15, 15) / 15.0
         return observation, reward, done, info
 
     def reset(self):
         return self.env.reset()
 
 
-def create_environment(env_name: str = 'SuperMarioBros-v0') -> gym.Env:
+def create_environment(env_name: str = 'SuperMarioBros-1-1-v0') -> gym.Env:
     env = gym_super_mario_bros.make(env_name)
-    env = ResizeFrameEnvWrapper(env, grayscale=True)
-    env = BufferFrameEnvWrapper(env, n_frames=4)
     env = ReshapeRewardEnvWrapper(env)
+    env = ResizeFrameEnvWrapper(env, grayscale=True)
+    env = NormalizeFrameEnvWrapper(env)
+    env = BufferFrameEnvWrapper(env, n_frames=4)
     env = BinarySpaceToDiscreteSpaceEnv(env, actions.COMPLEX_MOVEMENT)
     return env
 
@@ -128,8 +151,7 @@ def _worker(remote: Connection,
                 observation, reward, done, info = env.step(data)
                 if done:
                     observation = env.reset()
-                # Scale reward in range (-1, 1). 15 is the maximum reward.
-                remote.send((observation, reward / 15.0, done, info))
+                remote.send((observation, reward, done, info))
             elif cmd == 'reset':
                 observation = env.reset()
                 remote.send(observation)
