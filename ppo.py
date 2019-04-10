@@ -17,11 +17,11 @@ class PPOAgent:
                  actor_critic: BasePolicy,
                  lr: float = _START_LR,
                  lr_lambda: Callable[[int], float] = lambda step: _START_LR,
-                 clip_threshold: float = 0.2,
-                 epochs: int = 4,
-                 minibatches: int = 4,
+                 clip_threshold: float = 0.18,
+                 epochs: int = 3,
+                 minibatches: int = 8,
                  value_loss_coef: float = 0.5,
-                 entropy_coef: float = 0.01,
+                 entropy_coef: float = 0.0075,
                  max_grad_norm: float = 0.5):
         self._actor_critic = actor_critic
         self._clip_threshold = clip_threshold

@@ -17,13 +17,13 @@ MAX_X = 3161
 
 def learn(num_envs: int,
           device: torch.device,  # CUDA or CPU
-          total_steps: int = 512 * 8 * 2048,
-          steps_per_update: int = 512,
+          total_steps: int = 256 * 8 * 5000,
+          steps_per_update: int = 256,
           hidden_layer_size: int = 512,
-          recurrent_hidden_size: int = 256,
-          discount=0.98,
+          recurrent_hidden_size: int = 512,
+          discount=0.995,
           gae_lambda=0.95,
-          save_interval=128):
+          save_interval=250):
     envs = MultiprocessEnvironment(num_envs=num_envs)
     actor_critic = RecurrentPolicy(state_frame_channels=envs.observation_shape[0],
                                    action_space_size=envs.action_space_size,
@@ -87,6 +87,7 @@ def learn(num_envs: int,
                 cumulative_reward = experience_storage.rewards.sum((0, 2))
                 mean_reward = cumulative_reward.mean()
                 std_reward = cumulative_reward.std()
+                returns = experience_storage.returns[-2].mean()
 
             tb_writer.add_scalar('mario/lr', agent.current_lr(), update_step)
             tb_writer.add_scalars('mario/level_progress', {
@@ -96,6 +97,7 @@ def learn(num_envs: int,
                 'median': np.median(episode_rewards),
             }, update_step)
 
+            tb_writer.add_scalar('mario/returns', returns, update_step)
             tb_writer.add_scalars('mario/reward', {'mean': mean_reward,
                                                    'std': std_reward}, update_step)
             tb_writer.add_scalars('mario/loss', {
