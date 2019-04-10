@@ -80,10 +80,35 @@ class StochasticFrameSkipEnvWrapper(gym.Wrapper):
         return observation, total_reward, done, info
 
 
+class ReshapeRewardEnvWrapper(gym.Wrapper):
+
+    def __init__(self, env, score_reward_weigh: float = 0.025):
+        super().__init__(env)
+        self._prev_score = 0
+        self._score_reward_weight = score_reward_weigh
+
+    def step(self, action):
+        observation, reward, done, info = self.env.step(action)
+
+        # Include in-game score into reward.
+        reward += (info['score'] - self._prev_score) * self._score_reward_weight
+        self._prev_score = info['score']
+
+        if done:
+            reward += 50 if info['flag_get'] else -50
+
+        reward = np.clip(reward, -15, 15)
+        return observation, reward, done, info
+
+    def reset(self):
+        return self.env.reset()
+
+
 def create_environment(env_name: str = 'SuperMarioBros-v0') -> gym.Env:
     env = gym_super_mario_bros.make(env_name)
     env = StochasticFrameSkipEnvWrapper(env, n_frames=4, stick_prob=0.25)
     env = ResizeFrameEnvWrapper(env, grayscale=True)
+    env = ReshapeRewardEnvWrapper(env)
     env = BinarySpaceToDiscreteSpaceEnv(env, actions.COMPLEX_MOVEMENT)
     return env
 
