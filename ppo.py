@@ -1,4 +1,5 @@
 from collections import defaultdict
+from typing import Callable
 
 import torch
 import torch.nn as nn
@@ -7,11 +8,15 @@ from experience import ExperienceStorage
 from policy import BasePolicy
 
 
+_START_LR = 7.5e-4
+
+
 class PPOAgent:
 
     def __init__(self,
                  actor_critic: BasePolicy,
-                 lr: float = 1e-4,
+                 lr: float = _START_LR,
+                 lr_lambda: Callable[[int], float] = lambda step: _START_LR,
                  clip_threshold: float = 0.2,
                  epochs: int = 4,
                  minibatches: int = 4,
@@ -25,11 +30,19 @@ class PPOAgent:
         self._value_loss_coef = value_loss_coef
         self._entropy_coef = entropy_coef
         self._max_grad_norm = max_grad_norm
-        self._optimizer = torch.optim.Adam(actor_critic.parameters(), lr=lr)
+        self._optimizer = torch.optim.Adam(actor_critic.parameters(), lr=lr, eps=1e-5)
+        self._lr_scheduler = torch.optim.lr_scheduler.LambdaLR(self._optimizer,
+                                                               lr_lambda)
+
+    def current_lr(self):
+        [lr] = self._lr_scheduler.get_lr()
+        return lr
 
     def update(self, experience_storage: ExperienceStorage):
         losses = defaultdict(int)
         advantages = experience_storage.compute_advantages()
+
+        self._lr_scheduler.step()
 
         for epoch in range(self._epochs):
             for exp_batch in experience_storage.batches(advantages, self._minibatches):

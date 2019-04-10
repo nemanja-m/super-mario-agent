@@ -36,14 +36,16 @@ def learn(num_envs: int,
                                            observation_shape=envs.observation_shape,
                                            recurrent_hidden_size=recurrent_hidden_size,
                                            device=device)
-    agent = PPOAgent(actor_critic)
 
     initial_observations = envs.reset()
     experience_storage.insert_initial_observations(initial_observations)
 
-    num_updates = total_steps // (num_envs * steps_per_update)
     episode_rewards = deque(maxlen=16)
     tb_writer = SummaryWriter()
+
+    num_updates = total_steps // (num_envs * steps_per_update)
+    agent = PPOAgent(actor_critic,
+                     lr_lambda=lambda step: 1 - (step / float(num_updates)))
 
     for update_step in tqdm(range(num_updates)):
         for step in range(steps_per_update):
@@ -55,15 +57,15 @@ def learn(num_envs: int,
                  _,  # Action disribution entropy is not needed.
                  recurrent_hidden_states) = actor_critic.act(*actor_input)
 
-                observations, rewards, done_values, info_dicts = envs.step(actions)
-                masks = 1 - done_values
-                experience_storage.insert(observations,
-                                          actions,
-                                          action_log_probs,
-                                          rewards,
-                                          values,
-                                          masks,
-                                          recurrent_hidden_states)
+            observations, rewards, done_values, info_dicts = envs.step(actions)
+            masks = 1 - done_values
+            experience_storage.insert(observations,
+                                      actions,
+                                      action_log_probs,
+                                      rewards,
+                                      values,
+                                      masks,
+                                      recurrent_hidden_states)
 
             for done, info in zip(done_values, info_dicts):
                 if done:
@@ -86,6 +88,7 @@ def learn(num_envs: int,
                 mean_reward = cumulative_reward.mean()
                 std_reward = cumulative_reward.std()
 
+            tb_writer.add_scalar('mario/lr', agent.current_lr(), update_step)
             tb_writer.add_scalars('mario/level_progress', {
                 'min': np.min(episode_rewards),
                 'max': np.max(episode_rewards),
