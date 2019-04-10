@@ -113,18 +113,16 @@ class ExperienceStorage:
         self.recurrent_hidden_states[0].copy_(self.recurrent_hidden_states[-1])
         self.masks[0].copy_(self.masks[-1])
 
-    def _compute_advantages(self, eps: float=1e-5):
+    def compute_advantages(self, eps: float=1e-5):
         advantages = self.returns[:-1] - self.value_predictions[:-1]
         norm_advantages = (advantages - advantages.mean()) / (advantages.std() + eps)
         return norm_advantages
 
-    def batches(self, minibatches: int):
+    def batches(self, advantages: torch.tensor, minibatches: int):
         """Yield experience batches for recurrent policy training."""
         assert (self._num_envs % minibatches) == 0
         num_envs_per_batch = self._num_envs // minibatches
         random_env_indices = torch.randperm(self._num_envs)
-
-        advantages = self._compute_advantages()
 
         for start in range(0, self._num_envs, num_envs_per_batch):
             end = start + num_envs_per_batch

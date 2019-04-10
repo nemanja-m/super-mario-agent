@@ -11,7 +11,7 @@ class PPOAgent:
 
     def __init__(self,
                  actor_critic: BasePolicy,
-                 lr: float = 7.5e-4,
+                 lr: float = 1e-4,
                  clip_threshold: float = 0.2,
                  epochs: int = 4,
                  minibatches: int = 4,
@@ -29,9 +29,10 @@ class PPOAgent:
 
     def update(self, experience_storage: ExperienceStorage):
         losses = defaultdict(int)
+        advantages = experience_storage.compute_advantages()
 
         for epoch in range(self._epochs):
-            for exp_batch in experience_storage.batches(self._minibatches):
+            for exp_batch in experience_storage.batches(advantages, self._minibatches):
                 eval_input = exp_batch.action_eval_input()
                 (values,
                  action_log_probs,
