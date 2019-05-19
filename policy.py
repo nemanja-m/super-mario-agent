@@ -3,8 +3,11 @@ import torch.nn as nn
 from torch.distributions import Categorical
 
 
-def _init_module_weights(module: nn.Module, gain='relu') -> nn.Module:
-    gain_init = 1 if gain == 'constant' else nn.init.calculate_gain(gain)
+def _init_weights(module: nn.Module, gain='relu') -> nn.Module:
+    if isinstance(gain, float) or isinstance(gain, int):
+        gain_init = gain
+    else:
+        gain_init = nn.init.calculate_gain(gain)
     nn.init.orthogonal_(module.weight.data, gain=gain_init)
     nn.init.constant_(module.bias.data, 0)
     return module
@@ -24,66 +27,69 @@ class Flatten(nn.Module):
         return x.view(x.size(0), -1)
 
 
-class BasePolicy(nn.Module):
+class RecurrentPolicy(nn.Module):
     def __init__(self,
                  state_frame_channels: int,
                  action_space_size: int,
                  hidden_layer_size: int,
                  prev_actions_out_size: int,
+                 recurrent_hidden_size: int,
                  device: torch.device):
         super().__init__()
 
-        self._hidden_layer_size = hidden_layer_size
         self._action_space_size = action_space_size
+        self._hidden_layer_size = hidden_layer_size
         self._prev_actions_out_size = prev_actions_out_size
+        self._recurrent_hidden_size = recurrent_hidden_size
         self._device = device
-        self.is_recurrent = False
 
         self._cnn = nn.Sequential(
-            _init_module_weights(nn.Conv2d(state_frame_channels, 32, 8, stride=4)),
+            _init_weights(nn.Conv2d(state_frame_channels, 32, 3, stride=2, padding=1)),
             nn.ReLU(),
-            _init_module_weights(nn.Conv2d(32, 64, 4, stride=2)),
+            _init_weights(nn.Conv2d(32, 32, 3, stride=2, padding=1)),
             nn.ReLU(),
-            _init_module_weights(nn.Conv2d(64, 32, 3, stride=1)),
-            nn.ReLU())
+            _init_weights(nn.Conv2d(32, 32, 3, stride=2, padding=1)),
+            nn.ReLU(),
+            _init_weights(nn.Conv2d(32, 32, 3, stride=2, padding=1)),
+            nn.ReLU()
+        )
 
         self._flatten = Flatten()
 
-        # Last 4 actions are stacked.
         self._prev_action_linear = nn.Sequential(
-            _init_module_weights(nn.Linear(4 * action_space_size,
-                                           prev_actions_out_size)),
+            _init_weights(nn.Linear(4 * action_space_size, prev_actions_out_size)),
             nn.ReLU()
         )
 
         self._linear = nn.Sequential(
-            _init_module_weights(nn.Linear(32 * 7 * 8 + prev_actions_out_size,
-                                           hidden_layer_size)),
+            _init_weights(nn.Linear(32 * 6 * 6 + prev_actions_out_size,
+                                    hidden_layer_size)),
             nn.ReLU()
         )
 
+        self._gru = _init_gru(nn.GRU(input_size=self._hidden_layer_size,
+                                     hidden_size=self._recurrent_hidden_size))
+
+        self._critic_linear = _init_weights(
+            nn.Linear(self._recurrent_hidden_size, 1),
+            gain=1
+        )
+
+        self._actor_linear = _init_weights(
+            nn.Linear(self._recurrent_hidden_size, self._action_space_size),
+            gain=0.01
+        )
+
         self.train()
+        self.to(device)
 
-    def forward(self, input_states, masks, prev_actions, rnn_hxs):
-        cnn_out = self._cnn(input_states.type(torch.float32) / 255.0)
-        flat_out = self._flatten(cnn_out)
-        prev_actions_out = self._prev_action_linear(prev_actions)
-        linear_in = torch.cat((flat_out, prev_actions_out), dim=1)
-        linear_out = self._linear(linear_in)
-
-        if self.is_recurrent:
-            x, rnn_hxs = self._forward_gru(linear_out, rnn_hxs, masks)
-        else:
-            x = linear_out
-
-        return self._critic_linear(x), x, rnn_hxs
-
-    def act(self, input_states, rnn_hxs, masks, prev_actions):
+    def act(self, input_states, rnn_hxs, masks, prev_actions, greedy=False):
         value, actor_features, rnn_hxs = self._base_forward(input_states,
                                                             masks,
                                                             prev_actions,
                                                             rnn_hxs)
-        action, action_log_prob, action_entropy = self._sample_action(actor_features)
+        action, action_log_prob, action_entropy = self._sample_action(actor_features,
+                                                                      greedy)
         return value, action, action_log_prob, action_entropy, rnn_hxs
 
     def value(self, input_states, rnn_hxs, masks, prev_actions):
@@ -104,21 +110,13 @@ class BasePolicy(nn.Module):
                                                             prev_actions,
                                                             rnn_hxs)
         distribution = self._action_distribution(actor_features)
-        action_log_probs = distribution.log_prob(actions)
+        action_log_probs = distribution.log_prob(actions.squeeze(-1)).unsqueeze(-1)
         action_entropy = distribution.entropy().mean()
         return value, action_log_probs, action_entropy
 
-    def _base_forward(self, input_states, masks, prev_actions, rnn_hxs):
-        prev_actions_tensor = self._create_prev_actions_tensor(prev_actions)
-        value, actor_features, rnn_hxs = self(input_states,
-                                              masks,
-                                              prev_actions_tensor,
-                                              rnn_hxs)
-        return value, actor_features, rnn_hxs
-
-    def _sample_action(self, actor_features):
+    def _sample_action(self, actor_features, greedy):
         distribution = self._action_distribution(actor_features)
-        action = distribution.sample()
+        action = distribution.probs.argmax(dim=-1) if greedy else distribution.sample()
         action_log_prob = distribution.log_prob(action)
         action_entropy = distribution.entropy().mean()
         return (action.unsqueeze(-1).long(),
@@ -126,8 +124,7 @@ class BasePolicy(nn.Module):
                 action_entropy)
 
     def _action_distribution(self, actor_features):
-        actor_out = self._actor_linear(actor_features)
-        action_logits = nn.functional.log_softmax(actor_out, dim=1)
+        action_logits = self._actor_linear(actor_features)
         distribution = Categorical(logits=action_logits)
         return distribution
 
@@ -141,43 +138,27 @@ class BasePolicy(nn.Module):
         prev_actions_tensor.scatter_(2, prev_actions, 1)  # one-hot encoded actions
         return prev_actions_tensor.view(batch_size, -1)
 
+    def forward(self, input_states, masks, prev_actions, rnn_hxs):
+        cnn_out = self._cnn(input_states.float() / 255.0)
+        flat_out = self._flatten(cnn_out)
 
-class NonRecurrentPolicy(BasePolicy):
+        prev_actions_out = self._prev_action_linear(prev_actions)
+        linear_in = torch.cat((flat_out, prev_actions_out), dim=1)
+        linear_out = self._linear(linear_in)
 
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
+        x, rnn_hxs = self._recurrent_forward(linear_out, rnn_hxs, masks)
 
-        self._critic_linear = _init_module_weights(
-            nn.Linear(self._hidden_layer_size, 1),
-            gain='constant'
-        )
-        self._actor_linear = _init_module_weights(
-            nn.Linear(self._hidden_layer_size, self._action_space_size),
-            gain='constant'
-        )
-        self.to(self._device)
+        return self._critic_linear(x), x, rnn_hxs
 
+    def _base_forward(self, input_states, masks, prev_actions, rnn_hxs):
+        prev_actions_tensor = self._create_prev_actions_tensor(prev_actions)
+        value, actor_features, rnn_hxs = self(input_states,
+                                              masks,
+                                              prev_actions_tensor,
+                                              rnn_hxs)
+        return value, actor_features, rnn_hxs
 
-class RecurrentPolicy(BasePolicy):
-
-    def __init__(self, *args, **kwargs):
-        self._recurrent_hidden_size = kwargs.pop('recurrent_hidden_size')
-        super().__init__(*args, **kwargs)
-
-        self._gru = _init_gru(nn.GRU(input_size=self._hidden_layer_size,
-                                     hidden_size=self._recurrent_hidden_size))
-        self._critic_linear = _init_module_weights(
-            nn.Linear(self._recurrent_hidden_size, 1),
-            gain='constant'
-        )
-        self._actor_linear = _init_module_weights(
-            nn.Linear(self._recurrent_hidden_size, self._action_space_size),
-            gain='constant'
-        )
-        self.is_recurrent = True
-        self.to(self._device)
-
-    def _forward_gru(self, x, rnn_hxs, masks):
+    def _recurrent_forward(self, x, rnn_hxs, masks):
         if x.size(0) == rnn_hxs.size(0):
             x, hxs = self._gru(x.unsqueeze(0), (rnn_hxs * masks).unsqueeze(0))
             x = x.squeeze(0)
