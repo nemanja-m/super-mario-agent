@@ -5,23 +5,23 @@ import torch
 import torch.nn as nn
 
 from experience import ExperienceStorage
-from policy import BasePolicy
+from policy import RecurrentPolicy
 
 
-_START_LR = 7.5e-4
+_START_LR = 5.0e-4
 
 
 class PPOAgent:
 
     def __init__(self,
-                 actor_critic: BasePolicy,
+                 actor_critic: RecurrentPolicy,
                  lr: float = _START_LR,
                  lr_lambda: Callable[[int], float] = lambda step: _START_LR,
-                 clip_threshold: float = 0.18,
-                 epochs: int = 3,
-                 minibatches: int = 8,
+                 clip_threshold: float = 0.2,
+                 epochs: int = 4,
+                 minibatches: int = 16,
                  value_loss_coef: float = 0.5,
-                 entropy_coef: float = 0.0075,
+                 entropy_coef: float = 0.001,
                  max_grad_norm: float = 0.5):
         self._actor_critic = actor_critic
         self._clip_threshold = clip_threshold
@@ -56,7 +56,8 @@ class PPOAgent:
                                                 exp_batch.advantage_targets)
                 value_loss = self._value_loss(values,
                                               exp_batch.value_predictions,
-                                              exp_batch.returns)
+                                              exp_batch.returns,
+                                              clipped=False)
                 loss = policy_loss + \
                     self._value_loss_coef * value_loss - \
                     self._entropy_coef * action_dist_entropy
@@ -88,11 +89,14 @@ class PPOAgent:
         policy_loss = -torch.min(ratio_term, clamp_term).mean()
         return policy_loss
 
-    def _value_loss(self, values, value_predictions, returns):
-        value_preds_clipped = value_predictions + \
-            (values - value_predictions).clamp(-self._clip_threshold,
-                                               self._clip_threshold)
-        value_losses = (values - returns).pow(2)
-        value_losses_clipped = (value_preds_clipped - returns).pow(2)
-        value_loss = 0.5 * torch.max(value_losses, value_losses_clipped).mean()
+    def _value_loss(self, values, value_predictions, returns, clipped=False):
+        if clipped:
+            value_preds_clipped = value_predictions + \
+                (values - value_predictions).clamp(-self._clip_threshold,
+                                                   self._clip_threshold)
+            value_losses = (values - returns).pow(2)
+            value_losses_clipped = (value_preds_clipped - returns).pow(2)
+            value_loss = 0.5 * torch.max(value_losses, value_losses_clipped).mean()
+        else:
+            value_loss = 0.5 * (returns - values).pow(2).mean()
         return value_loss
