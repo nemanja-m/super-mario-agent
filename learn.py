@@ -3,17 +3,17 @@ import torch
 from tensorboardX import SummaryWriter
 from tqdm import tqdm
 
+from agent import PPOAgent
 from environment import MultiprocessEnvironment
 from experience import ExperienceStorage
 from policy import RecurrentPolicy
-from ppo import PPOAgent
 
 
 MAX_X = 3161
 
 
 def learn(num_envs: int,
-          device: torch.device,  # CUDA or CPU
+          device: torch.device,
           total_steps: int = 128 * 8 * 16 * 600,
           steps_per_update: int = 128,
           hidden_layer_size: int = 512,
@@ -73,9 +73,9 @@ def learn(num_envs: int,
             critic_input = experience_storage.get_critic_input()
             next_value = actor_critic.value(*critic_input)
 
-        experience_storage.compute_returns(next_value,
-                                           discount=discount,
-                                           gae_lambda=gae_lambda)
+        experience_storage.compute_gae_returns(next_value,
+                                               gamma=discount,
+                                               gae_lambda=gae_lambda)
 
         losses = agent.update(experience_storage)
 

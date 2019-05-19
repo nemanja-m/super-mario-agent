@@ -1,3 +1,4 @@
+from abc import ABC, abstractmethod
 from collections import defaultdict
 from typing import Callable
 
@@ -8,25 +9,19 @@ from experience import ExperienceStorage
 from policy import RecurrentPolicy
 
 
-_START_LR = 5.0e-4
+_STARTING_LR = 5.5e-4
 
 
-class PPOAgent:
+class Agent(ABC):
 
     def __init__(self,
                  actor_critic: RecurrentPolicy,
-                 lr: float = _START_LR,
-                 lr_lambda: Callable[[int], float] = lambda step: _START_LR,
-                 clip_threshold: float = 0.2,
-                 epochs: int = 4,
-                 minibatches: int = 16,
+                 lr: float = _STARTING_LR,
+                 lr_lambda: Callable[[int], float] = lambda _: _STARTING_LR,
                  value_loss_coef: float = 0.5,
                  entropy_coef: float = 0.001,
                  max_grad_norm: float = 0.5):
         self._actor_critic = actor_critic
-        self._clip_threshold = clip_threshold
-        self._epochs = epochs
-        self._minibatches = minibatches
         self._value_loss_coef = value_loss_coef
         self._entropy_coef = entropy_coef
         self._max_grad_norm = max_grad_norm
@@ -37,6 +32,21 @@ class PPOAgent:
     def current_lr(self):
         [lr] = self._lr_scheduler.get_lr()
         return lr
+
+    @abstractmethod
+    def update(self, experience_storage: ExperienceStorage):
+        pass
+
+
+class PPOAgent(Agent):
+
+    def __init__(self,
+                 *args,
+                 **kwargs):
+        super().__init__(*args, **kwargs)
+        self._clip_threshold = kwargs.pop('clip_threshold', 0.2)
+        self._epochs = kwargs.pop('epochs', 4)
+        self._minibatches = kwargs.pop('minibatches', 16)
 
     def update(self, experience_storage: ExperienceStorage):
         losses = defaultdict(int)
@@ -54,10 +64,8 @@ class PPOAgent:
                 policy_loss = self._policy_loss(action_log_probs,
                                                 exp_batch.action_log_probs,
                                                 exp_batch.advantage_targets)
-                value_loss = self._value_loss(values,
-                                              exp_batch.value_predictions,
-                                              exp_batch.returns,
-                                              clipped=False)
+                value_loss = 0.5 * (exp_batch.returns - values).pow(2).mean()
+
                 loss = policy_loss + \
                     self._value_loss_coef * value_loss - \
                     self._entropy_coef * action_dist_entropy
@@ -88,15 +96,3 @@ class PPOAgent:
         clamp_term = clamp * advantage_targets
         policy_loss = -torch.min(ratio_term, clamp_term).mean()
         return policy_loss
-
-    def _value_loss(self, values, value_predictions, returns, clipped=False):
-        if clipped:
-            value_preds_clipped = value_predictions + \
-                (values - value_predictions).clamp(-self._clip_threshold,
-                                                   self._clip_threshold)
-            value_losses = (values - returns).pow(2)
-            value_losses_clipped = (value_preds_clipped - returns).pow(2)
-            value_loss = 0.5 * torch.max(value_losses, value_losses_clipped).mean()
-        else:
-            value_loss = 0.5 * (returns - values).pow(2).mean()
-        return value_loss
