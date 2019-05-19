@@ -1,6 +1,3 @@
-import multiprocessing as mp
-from collections import deque
-
 import numpy as np
 import torch
 from tensorboardX import SummaryWriter
@@ -17,11 +14,11 @@ MAX_X = 3161
 
 def learn(num_envs: int,
           device: torch.device,  # CUDA or CPU
-          total_steps: int = 256 * 8 * 5000,
-          steps_per_update: int = 256,
+          total_steps: int = 128 * 8 * 16 * 600,
+          steps_per_update: int = 128,
           hidden_layer_size: int = 512,
           recurrent_hidden_size: int = 512,
-          discount=0.995,
+          discount=0.99,
           gae_lambda=0.95,
           save_interval=250):
     envs = MultiprocessEnvironment(num_envs=num_envs)
@@ -40,7 +37,6 @@ def learn(num_envs: int,
     initial_observations = envs.reset()
     experience_storage.insert_initial_observations(initial_observations)
 
-    episode_rewards = deque(maxlen=16)
     tb_writer = SummaryWriter()
 
     num_updates = total_steps // (num_envs * steps_per_update)
@@ -48,6 +44,7 @@ def learn(num_envs: int,
                      lr_lambda=lambda step: 1 - (step / float(num_updates)))
 
     for update_step in tqdm(range(num_updates)):
+        episode_rewards = []
         for step in range(steps_per_update):
             with torch.no_grad():
                 actor_input = experience_storage.get_actor_input(step)
@@ -87,7 +84,6 @@ def learn(num_envs: int,
                 cumulative_reward = experience_storage.rewards.sum((0, 2))
                 mean_reward = cumulative_reward.mean()
                 std_reward = cumulative_reward.std()
-                returns = experience_storage.returns[-2].mean()
 
             tb_writer.add_scalar('mario/lr', agent.current_lr(), update_step)
             tb_writer.add_scalars('mario/level_progress', {
@@ -97,14 +93,19 @@ def learn(num_envs: int,
                 'median': np.median(episode_rewards),
             }, update_step)
 
-            tb_writer.add_scalar('mario/returns', returns, update_step)
             tb_writer.add_scalars('mario/reward', {'mean': mean_reward,
                                                    'std': std_reward}, update_step)
             tb_writer.add_scalars('mario/loss', {
                 'policy': losses['policy_loss'],
                 'value': losses['value_loss'],
-                'action_dist_entropy': losses['action_dist_entropy']
             }, update_step)
+            tb_writer.add_scalar('mario/action_dist_entropy',
+                                 losses['action_dist_entropy'],
+                                 update_step)
+
+            if np.min(episode_rewards) == 1.0:
+                model_path = 'models/super_model_{}.bin'.format(update_step + 1)
+                torch.save(actor_critic.state_dict(), model_path)
 
         save_model = (update_step % save_interval) == (save_interval - 1)
         if save_model:
@@ -115,6 +116,6 @@ def learn(num_envs: int,
 
 
 if __name__ == '__main__':
-    cpu_count = mp.cpu_count()
+    cpu_count = 32
     device = 'cuda:0' if torch.cuda.is_available() else 'cpu'
     learn(num_envs=cpu_count, device=device)

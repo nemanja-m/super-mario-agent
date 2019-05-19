@@ -1,5 +1,4 @@
 import multiprocessing as mp
-from collections import deque
 from multiprocessing.connection import Connection
 
 import cv2
@@ -50,94 +49,81 @@ class ResizeFrameEnvWrapper(gym.ObservationWrapper):
         return frame.transpose(2, 0, 1)
 
 
-class NormalizeFrameEnvWrapper(gym.ObservationWrapper):
+class StochasticFrameSkipEnvWrapper(gym.Wrapper):
 
-    def __init__(self, env, alpha: float=0.9999):
+    def __init__(self, env, n_frames: int = 4, action_stick_prob: float = 0.25):
         super().__init__(env)
-        self._state_mean = 0
-        self._state_std = 0
-        self._alpha = alpha
-        self._num_steps = 0
-
-    def observation(self, observation):
-        self._num_steps += 1
-        self._state_mean = self._state_mean * self._alpha + \
-            observation.mean() * (1 - self._alpha)
-        self._state_std = self._state_std * self._alpha + \
-            observation.std() * (1 - self._alpha)
-
-        unbiased_mean = self._state_mean / (1 - pow(self._alpha, self._num_steps))
-        unbiased_std = self._state_std / (1 - pow(self._alpha, self._num_steps))
-        return (observation - unbiased_mean) / (unbiased_std + 1e-8)
-
-
-class BufferFrameEnvWrapper(gym.Wrapper):
-
-    def __init__(self, env: gym.Env, n_frames: int = 4):
-        super().__init__(env)
-        _, height, width = env.observation_space.shape
-        observation_shape = (n_frames, height, width)
-        self.observation_space = gym.spaces.Box(low=0, high=255,
-                                                shape=observation_shape,
-                                                dtype=np.uint8)
-        self._buffer = deque(maxlen=n_frames)
         self._n_frames = n_frames
-
-    def step(self, action):
-        observation, reward, done, info = self.env.step(action)
-        self._buffer.append(observation)
-        total_reward = reward
-        for _ in range(self._n_frames - 1):
-            if not done:
-                observation, reward, done, info = self.env.step(action)
-                total_reward += reward
-            self._buffer.append(observation)
-        return self._get_stacked_observations(), total_reward, done, info
+        self._action_stick_prob = action_stick_prob
+        self._current_action = None
 
     def reset(self):
-        self._buffer.clear()
-        observation = self.env.reset()
-        for _ in range(self._n_frames):
-            self._buffer.append(observation)
-        return self._get_stacked_observations()
+        self._current_action = None
+        return self.env.reset()
 
-    def _get_stacked_observations(self):
-        return np.stack(self._buffer, axis=0).reshape(self.observation_space.shape)
+    def step(self, action):
+        done = False
+        total_reward = 0
+        for frame in range(self._n_frames):
+            if self._current_action is None:
+                self._current_action = action
+            elif frame == 0:
+                if np.random.rand() > self._action_stick_prob:
+                    self._current_action = action
+            elif frame == 1:
+                self._current_action = action
+            observation, reward, done, info = self.env.step(self._current_action)
+            total_reward += reward
+            if done:
+                break
+        return observation, total_reward, done, info
 
 
 class ReshapeRewardEnvWrapper(gym.Wrapper):
 
-    def __init__(self, env, score_reward_weigh: float = 0.025):
+    def __init__(self,
+                 env: gym.Env,
+                 max_delta_x: int = 2,
+                 score_reward_weight: float = 0.025,
+                 time_reward_weight: float = -0.9):
         super().__init__(env)
+        self._max_delta_x = max_delta_x
+        self._score_reward_weight = score_reward_weight
+        self._time_reward_weight = time_reward_weight
         self._prev_score = 0
-        self._score_reward_weight = score_reward_weigh
+        self._prev_x = 40  # Starting Mario position.
+        self._prev_time = 400
 
     def step(self, action):
         observation, reward, done, info = self.env.step(action)
+
+        delta_x = info['x_pos'] - self._prev_x - 0.05
+        reward = np.clip(delta_x, -self._max_delta_x, self._max_delta_x)
+        self._prev_x = info['x_pos']
+
+        reward += (self._prev_time - info['time']) * self._time_reward_weight
+        self._prev_time = info['time']
 
         # Include in-game score into reward.
         reward += (info['score'] - self._prev_score) * self._score_reward_weight
         self._prev_score = info['score']
 
         if done:
-            reward += 50 if info['flag_get'] else -50
+            reward += 500 if info['flag_get'] else -50
 
-        # Scale reward to [-1, 1].
-        reward = np.clip(reward, -15, 15) / 15.0
+        reward /= 10.0
         return observation, reward, done, info
 
     def reset(self):
         return self.env.reset()
 
 
-def create_environment(env_name: str = 'SuperMarioBros-1-1-v0') -> gym.Env:
-    env = gym_super_mario_bros.make(env_name)
-    env = ReshapeRewardEnvWrapper(env)
+def build_environment(mario_env_name: str, action_space):
+    env = gym_super_mario_bros.make(mario_env_name)
     env = ResizeFrameEnvWrapper(env, grayscale=True)
-    env = NormalizeFrameEnvWrapper(env)
-    env = BufferFrameEnvWrapper(env, n_frames=4)
-    env = BinarySpaceToDiscreteSpaceEnv(env, actions.COMPLEX_MOVEMENT)
-    return env
+    env = ReshapeRewardEnvWrapper(env)
+    env = StochasticFrameSkipEnvWrapper(env, n_frames=4)
+    return BinarySpaceToDiscreteSpaceEnv(env, action_space)
 
 
 def _worker(remote: Connection,
@@ -168,13 +154,17 @@ def _worker(remote: Connection,
 
 class MultiprocessEnvironment:
 
-    def __init__(self, num_envs: int):
+    def __init__(self,
+                 num_envs: int,
+                 mario_env_name: str = 'SuperMarioBros-1-1-v0',
+                 action_space=actions.COMPLEX_MOVEMENT):
+
         self._closed = False
         self._remotes, self._work_remotes = zip(*[mp.Pipe() for _ in range(num_envs)])
         self._processes = []
 
         for work_remote, remote in zip(self._work_remotes, self._remotes):
-            env = create_environment()
+            env = build_environment(mario_env_name, action_space)
             args = (work_remote, remote, env)
             process = mp.Process(target=_worker, args=args, daemon=True)
             process.start()
