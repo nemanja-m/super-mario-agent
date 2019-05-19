@@ -1,5 +1,6 @@
 import multiprocessing as mp
 from multiprocessing.connection import Connection
+from typing import Tuple
 
 import cv2
 import gym
@@ -10,20 +11,24 @@ from gym_super_mario_bros import actions
 from nes_py.wrappers import BinarySpaceToDiscreteSpaceEnv
 
 
+EnvStep = Tuple[np.ndarray, float, bool, dict]
+
+
 class ResizeFrameEnvWrapper(gym.ObservationWrapper):
+    """Resize env frames to width x height.
+
+    State image dimensions are transposed to match pytorch image dimension
+    conventions.  Pytorch uses (channels, height, width) image shape.
+
+    Optionally, frame is converted to a graycale image.
+
+    """
+
     def __init__(self,
                  env: gym.Env,
                  width: int = 96,
                  height: int = 90,
                  grayscale: bool = False):
-        """Resize env frames to width x height.
-
-        State image dimensions are transposed to match pytorch image dimension
-        conventions.  Pytorch uses (channels, height, width) image shape.
-
-        :param env: (Gym Environment) the environment
-
-        """
         super().__init__(env)
         self.width = width
         self.height = height
@@ -35,7 +40,6 @@ class ResizeFrameEnvWrapper(gym.ObservationWrapper):
                                                 dtype=env.observation_space.dtype)
 
     def observation(self, frame: np.ndarray) -> np.ndarray:
-        """Returns the downsampled, current observation from a frame."""
         if self.grayscale:
             frame = cv2.cvtColor(frame, cv2.COLOR_RGB2GRAY)
 
@@ -50,18 +54,29 @@ class ResizeFrameEnvWrapper(gym.ObservationWrapper):
 
 
 class StochasticFrameSkipEnvWrapper(gym.Wrapper):
+    """Skip n state frames and with some probability appy provided action.
 
-    def __init__(self, env, n_frames: int = 4, action_stick_prob: float = 0.25):
+    Frame skipping increases training convergence speed. In Super Mario Bros
+    game, 20 frames are 1 in-game second. Without frame skipping, there would be
+    a lot similar (state, action, reward) pairs and that would slow down
+    training process.
+
+    Stochastic frame skipping ignores provided action with certain probability.
+    This means that previous action will be taken instead of provided one.
+
+    """
+
+    def __init__(self, env: gym.Env, n_frames: int = 4, action_stick_prob: float = 0.25):
         super().__init__(env)
         self._n_frames = n_frames
         self._action_stick_prob = action_stick_prob
         self._current_action = None
 
-    def reset(self):
+    def reset(self) -> np.ndarray:
         self._current_action = None
         return self.env.reset()
 
-    def step(self, action):
+    def step(self, action: int) -> EnvStep:
         done = False
         total_reward = 0
         for frame in range(self._n_frames):
@@ -80,45 +95,48 @@ class StochasticFrameSkipEnvWrapper(gym.Wrapper):
 
 
 class ReshapeRewardEnvWrapper(gym.Wrapper):
+    """Reshape and scale reward.
+
+    Total reward is calculated as:
+
+        R = V + T + D + S
+
+    where:
+        - V is the difference in agent x coordinate values between states,
+        - T is the difference in the game clock between frames,
+        - D is a death penalty that penalizes the agent for dying in a state or
+          a level completed reward if agent gets to the flag at the end of level,
+        - S is the difference in in-game score between frames.
+
+    Total reward is then scaled down.
+
+    """
 
     def __init__(self,
                  env: gym.Env,
-                 max_delta_x: int = 2,
-                 score_reward_weight: float = 0.025,
-                 time_reward_weight: float = -0.9):
+                 score_reward_weight: float = 0.025):
         super().__init__(env)
-        self._max_delta_x = max_delta_x
         self._score_reward_weight = score_reward_weight
-        self._time_reward_weight = time_reward_weight
         self._prev_score = 0
-        self._prev_x = 40  # Starting Mario position.
-        self._prev_time = 400
 
-    def step(self, action):
+    def step(self, action: int) -> EnvStep:
         observation, reward, done, info = self.env.step(action)
-
-        delta_x = info['x_pos'] - self._prev_x - 0.05
-        reward = np.clip(delta_x, -self._max_delta_x, self._max_delta_x)
-        self._prev_x = info['x_pos']
-
-        reward += (self._prev_time - info['time']) * self._time_reward_weight
-        self._prev_time = info['time']
 
         # Include in-game score into reward.
         reward += (info['score'] - self._prev_score) * self._score_reward_weight
         self._prev_score = info['score']
 
         if done:
-            reward += 500 if info['flag_get'] else -50
+            reward += 50 if info['flag_get'] else -50
 
         reward /= 10.0
         return observation, reward, done, info
 
-    def reset(self):
+    def reset(self) -> np.ndarray:
         return self.env.reset()
 
 
-def build_environment(mario_env_name: str, action_space):
+def build_environment(mario_env_name: str, action_space: list) -> gym.Env:
     env = gym_super_mario_bros.make(mario_env_name)
     env = ResizeFrameEnvWrapper(env, grayscale=True)
     env = ReshapeRewardEnvWrapper(env)
@@ -153,6 +171,19 @@ def _worker(remote: Connection,
 
 
 class MultiprocessEnvironment:
+    """Run parallel environments using multiprocessing module.
+
+    To speed-up training, good idea is to explore multiple environments in
+    parallel.  This class handles commuunication between parent process, where
+    training loop is running, and child processes, that correspond to separate
+    Super Mario game environments.
+
+    """
+
+    @classmethod
+    def create_mario_env(cls, num_envs: int, world: int = 1, stage: int = 1):
+        env_name = 'SuperMarioBros-{world}-{stage}-v0'.format(world=world, stage=stage)
+        return cls(num_envs, mario_env_name=env_name)
 
     def __init__(self,
                  num_envs: int,
