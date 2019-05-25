@@ -98,14 +98,14 @@ class ExperienceStorage:
     def get_critic_input(self):
         return self.get_actor_input(step=-1)
 
-    def compute_returns(self, next_value, discount, gae_lambda):
+    def compute_gae_returns(self, next_value, gamma, gae_lambda):
         self.value_predictions[-1] = next_value
         gae = 0
         for step in reversed(range(self.rewards.size(0))):
             delta = self.rewards[step] + \
-                discount * self.value_predictions[step + 1] * self.masks[step + 1] - \
+                gamma * self.value_predictions[step + 1] * self.masks[step + 1] - \
                 self.value_predictions[step]
-            gae = delta + discount * gae_lambda * self.masks[step + 1] * gae
+            gae = delta + gamma * gae_lambda * self.masks[step + 1] * gae
             self.returns[step] = gae + self.value_predictions[step]
 
     def after_update(self):
@@ -113,7 +113,7 @@ class ExperienceStorage:
         self.recurrent_hidden_states[0].copy_(self.recurrent_hidden_states[-1])
         self.masks[0].copy_(self.masks[-1])
 
-    def compute_advantages(self, eps: float=1e-5):
+    def compute_advantages(self, eps: float = 1e-5):
         advantages = self.returns[:-1] - self.value_predictions[:-1]
         norm_advantages = (advantages - advantages.mean()) / (advantages.std() + eps)
         return norm_advantages
