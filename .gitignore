@@ -108,3 +108,6 @@ venv.bak/
 
 # tensorboard runs
 /runs
+
+# pretrained models
+!models/level_*.bin

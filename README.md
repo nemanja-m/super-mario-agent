@@ -6,6 +6,7 @@ plays Super Mario Bros in [emulated environment](https://github.com/Kautenja/gym
 <p align="center">
   <img src="./images/level_1_1.gif">
   <img src="./images/level_1_2.gif">
+  <img src="./images/level_1_4.gif">
 </p>
 
 # Quick Start
