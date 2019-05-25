@@ -136,11 +136,16 @@ class ReshapeRewardEnvWrapper(gym.Wrapper):
         return self.env.reset()
 
 
-def build_environment(mario_env_name: str, action_space: list) -> gym.Env:
+def build_environment(mario_env_name: str,
+                      action_space: list = actions.COMPLEX_MOVEMENT,
+                      stochastic: bool = True) -> gym.Env:
     env = gym_super_mario_bros.make(mario_env_name)
     env = ResizeFrameEnvWrapper(env, grayscale=True)
     env = ReshapeRewardEnvWrapper(env)
-    env = StochasticFrameSkipEnvWrapper(env, n_frames=4)
+
+    if stochastic:
+        env = StochasticFrameSkipEnvWrapper(env, n_frames=4)
+
     return BinarySpaceToDiscreteSpaceEnv(env, action_space)
 
 

@@ -83,13 +83,12 @@ class RecurrentPolicy(nn.Module):
         self.train()
         self.to(device)
 
-    def act(self, input_states, rnn_hxs, masks, prev_actions, greedy=False):
+    def act(self, input_states, rnn_hxs, masks, prev_actions):
         value, actor_features, rnn_hxs = self._base_forward(input_states,
                                                             masks,
                                                             prev_actions,
                                                             rnn_hxs)
-        action, action_log_prob, action_entropy = self._sample_action(actor_features,
-                                                                      greedy)
+        action, action_log_prob, action_entropy = self._sample_action(actor_features)
         return value, action, action_log_prob, action_entropy, rnn_hxs
 
     def value(self, input_states, rnn_hxs, masks, prev_actions):
@@ -114,9 +113,9 @@ class RecurrentPolicy(nn.Module):
         action_entropy = distribution.entropy().mean()
         return value, action_log_probs, action_entropy
 
-    def _sample_action(self, actor_features, greedy):
+    def _sample_action(self, actor_features):
         distribution = self._action_distribution(actor_features)
-        action = distribution.probs.argmax(dim=-1) if greedy else distribution.sample()
+        action = distribution.sample()
         action_log_prob = distribution.log_prob(action)
         action_entropy = distribution.entropy().mean()
         return (action.unsqueeze(-1).long(),
