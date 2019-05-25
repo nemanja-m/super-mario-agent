@@ -12,7 +12,7 @@ from policy import RecurrentPolicy
 MAX_X = 3161
 
 
-def learn(num_envs: int,
+def train(num_envs: int,
           device: torch.device,
           total_steps: int = 128 * 8 * 16 * 600,
           steps_per_update: int = 128,
@@ -118,4 +118,4 @@ def learn(num_envs: int,
 if __name__ == '__main__':
     cpu_count = 32
     device = 'cuda:0' if torch.cuda.is_available() else 'cpu'
-    learn(num_envs=cpu_count, device=device)
+    train(num_envs=cpu_count, device=device)

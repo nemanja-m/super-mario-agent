@@ -39,10 +39,10 @@ Agent can be stopped with `CTRL + C`.
 
 ## Training
 
-Learning process is started with
+Training process is started with
 
 ```
-python learn.py
+python train.py
 ```
 
 All available arguments and their default values are described in `args.py`.
@@ -54,7 +54,7 @@ tensorboard --logdir runs/<training-timestamp>
 ```
 
 to start tensorboard server. `<training-timestamp>` corresponds to timestamp
-when `python learn.py` is executed.
+when `python train.py` is executed.
 
 # Details
 
@@ -133,3 +133,8 @@ and action distribution.
 <p align="center">
   <img src="./images/actor_critic_net.png">
 </p>
+
+# License
+
+This project is provided for educational purposes only. It is not affiliated
+with and has not been approved by Nintendo.
