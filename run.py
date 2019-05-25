@@ -5,13 +5,10 @@ import time
 
 import torch
 
+import arguments
 from environment import build_environment
 from policy import RecurrentPolicy
 
-
-HIDDEN_LAYER_SIZE = 512
-PREV_ACTIONS_HIDDEN_SIZE = 256
-RECURRENT_HIDDEN_SIZE = 512
 
 _ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -28,7 +25,7 @@ def _env_name(world: int, stage: int) -> str:
                                                     version='v0')
 
 
-def run(hidden_layer_size: int, world: int, stage: int):
+def run(world: int, stage: int):
     model_path = _model_path(world, stage)
 
     if not os.path.isfile(model_path):
@@ -41,16 +38,18 @@ def run(hidden_layer_size: int, world: int, stage: int):
 
     env = build_environment(mario_env_name=_env_name(world, stage), stochastic=False)
 
-    actor_critic = RecurrentPolicy(state_frame_channels=env.observation_space.shape[0],
-                                   action_space_size=env.action_space.n,
-                                   hidden_layer_size=hidden_layer_size,
-                                   prev_actions_out_size=PREV_ACTIONS_HIDDEN_SIZE,
-                                   recurrent_hidden_size=RECURRENT_HIDDEN_SIZE,
-                                   device=torch.device('cpu'))
+    actor_critic = RecurrentPolicy(
+        state_frame_channels=env.observation_space.shape[0],
+        action_space_size=env.action_space.n,
+        hidden_layer_size=arguments.HIDDEN_LAYER_SIZE,
+        recurrent_hidden_size=arguments.RECURRENT_HIDDEN_LAYER_SIZE,
+        prev_actions_out_size=arguments.PREV_ACTIONS_HIDDEN_LAYER_SIZE,
+        device=torch.device('cpu')
+    )
     actor_critic.load_state_dict(model_weights)
 
     observation = env.reset()
-    rnn_hxs = torch.zeros(1, RECURRENT_HIDDEN_SIZE)
+    rnn_hxs = torch.zeros(1, arguments.RECURRENT_HIDDEN_LAYER_SIZE)
     masks = torch.ones(1, 1)
     prev_actions = torch.zeros(1, 4, 1, dtype=torch.long)
 
@@ -82,8 +81,6 @@ def run(hidden_layer_size: int, world: int, stage: int):
 
 def parse_args():
     parser = argparse.ArgumentParser('Run trained Super Mario agent in environment.')
-    parser.add_argument('--hidden', type=int, default=HIDDEN_LAYER_SIZE,
-                        help='Size of hidden layer in recurrent policy.')
     parser.add_argument('-w', '--world', type=int, default=1,
                         help='Super Mario Bros world.')
     parser.add_argument('-s', '--stage', type=int, default=1,
@@ -97,4 +94,4 @@ if __name__ == '__main__':
     assert 1 <= args.world <= 8, 'Super Mario world must be from 1 to 8.'
     assert 1 <= args.stage <= 4, 'Super Mario stage must be from 1 to 4.'
 
-    run(hidden_layer_size=args.hidden, world=args.world, stage=args.stage)
+    run(world=args.world, stage=args.stage)

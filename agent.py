@@ -9,23 +9,25 @@ from experience import ExperienceStorage
 from policy import RecurrentPolicy
 
 
-_STARTING_LR = 5.5e-4
+EPS = 1e-5
 
 
 class Agent(ABC):
 
     def __init__(self,
                  actor_critic: RecurrentPolicy,
-                 lr: float = _STARTING_LR,
-                 lr_lambda: Callable[[int], float] = lambda _: _STARTING_LR,
-                 value_loss_coef: float = 0.5,
-                 entropy_coef: float = 0.001,
-                 max_grad_norm: float = 0.5):
+                 lr: float,
+                 lr_lambda: Callable[[int], float],
+                 policy_loss_coef: float,
+                 value_loss_coef: float,
+                 entropy_loss_coef: float,
+                 max_grad_norm: float):
         self._actor_critic = actor_critic
+        self._policy_loss_coef = policy_loss_coef
         self._value_loss_coef = value_loss_coef
-        self._entropy_coef = entropy_coef
+        self._entropy_loss_coef = entropy_loss_coef
         self._max_grad_norm = max_grad_norm
-        self._optimizer = torch.optim.Adam(actor_critic.parameters(), lr=lr, eps=1e-5)
+        self._optimizer = torch.optim.Adam(actor_critic.parameters(), lr=lr, eps=EPS)
         self._lr_scheduler = torch.optim.lr_scheduler.LambdaLR(self._optimizer,
                                                                lr_lambda)
 
@@ -43,10 +45,10 @@ class PPOAgent(Agent):
     def __init__(self,
                  *args,
                  **kwargs):
+        self._clip_threshold = kwargs.pop('clip_threshold')
+        self._epochs = kwargs.pop('epochs')
+        self._minibatches = kwargs.pop('minibatches')
         super().__init__(*args, **kwargs)
-        self._clip_threshold = kwargs.pop('clip_threshold', 0.2)
-        self._epochs = kwargs.pop('epochs', 4)
-        self._minibatches = kwargs.pop('minibatches', 16)
 
     def update(self, experience_storage: ExperienceStorage):
         losses = defaultdict(int)
@@ -66,9 +68,9 @@ class PPOAgent(Agent):
                                                 exp_batch.advantage_targets)
                 value_loss = 0.5 * (exp_batch.returns - values).pow(2).mean()
 
-                loss = policy_loss + \
+                loss = self._policy_loss_coef * policy_loss + \
                     self._value_loss_coef * value_loss - \
-                    self._entropy_coef * action_dist_entropy
+                    self._entropy_loss_coef * action_dist_entropy
 
                 self._optimizer.zero_grad()
                 loss.backward()

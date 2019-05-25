@@ -45,7 +45,7 @@ Training process is started with
 python train.py
 ```
 
-All available arguments and their default values are described in `args.py`.
+All available arguments and their default values are described in [arguments.py](./arguments.py).
 Training visualization is done with tensorboard, so after starting training
 process run
 
