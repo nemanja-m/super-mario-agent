@@ -1,5 +1,5 @@
 gym-super-mario-bros==7.1.6
 tensorboardX==1.6
-tensorflow==1.13.1
+tensorflow==1.15.0
 torch==1.0.1.post2
 torchvision==0.2.2.post3
